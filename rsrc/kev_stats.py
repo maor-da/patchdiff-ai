@@ -1,14 +1,9 @@
-import os, sys, time, math, requests
+import os, sys, time, math, requests, argparse
 from datetime import datetime, timezone
 
 BASE = "https://services.nvd.nist.gov/rest/json/cves/2.0?hasKev"
 HDR = {"User-Agent": "tte/1.0", "Accept": "application/json"}
 if os.getenv("NVD_API_KEY"): HDR["apiKey"] = os.getenv("NVD_API_KEY")
-
-# ---- hard-coded date range (UTC) ----
-y = 2018
-START_DATE = datetime(y, 1, 1, tzinfo=timezone.utc)
-END_DATE = datetime(y+1, 1, 1, tzinfo=timezone.utc)
 
 
 # -------------------------------------
@@ -56,7 +51,51 @@ def hist(deltas, edges):
     return counts
 
 
+def parse_date_range(date_str):
+    """Parse date range string and return (START_DATE, END_DATE) tuple."""
+    if not date_str:
+        return datetime(2025, 1, 1, tzinfo=timezone.utc), datetime(2026, 1, 1, tzinfo=timezone.utc)
+    
+    # Parse date format (dd/mm/yyyy)
+    if '/' in date_str:
+        parts = [p.strip() for p in date_str.split('-', 1)]
+        try:
+            start = datetime.strptime(parts[0], "%d/%m/%Y").replace(tzinfo=timezone.utc)
+            end = datetime.strptime(parts[1], "%d/%m/%Y").replace(tzinfo=timezone.utc) if len(parts) > 1 else start.replace(year=start.year + 1)
+            return start, end
+        except ValueError as e:
+            raise ValueError(f"Invalid date format: {date_str}") from e
+    
+    # Parse year ranges
+    years = set()
+    for seg in date_str.split(','):
+        seg = seg.strip()
+        if '-' in seg:
+            try:
+                start, end = map(int, seg.split('-'))
+                years.update(range(start, end + 1))
+            except ValueError:
+                continue
+        else:
+            try:
+                years.add(int(seg))
+            except ValueError:
+                continue
+    
+    if not years:
+        raise ValueError(f"Could not parse year range: {date_str}")
+    
+    return datetime(min(years), 1, 1, tzinfo=timezone.utc), datetime(max(years) + 1, 1, 1, tzinfo=timezone.utc)
+
+
 def main():
+    parser = argparse.ArgumentParser(description="KEV statistics with customizable date ranges")
+    parser.add_argument('range', nargs='?', default=None, 
+                       help='Year range (e.g., "2025", "2020-2025", "2021, 2023-2025, 2018") or date range (dd/mm/yyyy - dd/mm/yyyy)')
+    args = parser.parse_args()
+    
+    START_DATE, END_DATE = parse_date_range(args.range)
+    
     vulns = fetch()
     deltas, zero, neg = [], [], []
     for e in vulns:
