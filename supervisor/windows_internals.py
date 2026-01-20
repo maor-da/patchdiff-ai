@@ -20,6 +20,7 @@ class WindowsInternalsContext:
     cve_details: CveDetails
     query: str
     docs: list[tuple[Document, float]]
+    user_docs: list[tuple[Document, float]]
 
 
 @defaultdataclass
@@ -99,6 +100,7 @@ class WindowsInternals(Agent):
     @defaultdataclass(frozen=True)
     class NODES:
         collect = "Collect relevant files"
+        query_more_files = "Query more files (Human-in-the-Loop)"
         rank = 'Rank relevancy'
 
     def __init__(self):
@@ -112,10 +114,12 @@ class WindowsInternals(Agent):
         builder = StateGraph(WindowsInternalsContext)
 
         builder.add_node(self.NODES.collect, self.collect)
+        builder.add_node(self.NODES.query_more_files, self.query_more_files)
         builder.add_node(self.NODES.rank, self.rank)
 
         builder.set_entry_point(self.NODES.collect)
-        builder.add_edge(self.NODES.collect, self.NODES.rank)
+        builder.add_edge(self.NODES.collect, self.NODES.query_more_files)
+        builder.add_edge(self.NODES.query_more_files, self.NODES.rank)
 
         builder.add_conditional_edges(self.NODES.rank, self.refinement,
                                       [
@@ -158,6 +162,184 @@ class WindowsInternals(Agent):
 
         return {'docs': docs, 'query': result.query}
 
+    async def query_more_files(self, context: WindowsInternalsContext):
+        context.state_info.node.append(self.NODES.query_more_files)
+        
+        # Initialize user_docs if not already set
+        if not context.user_docs:
+            user_docs = []
+        else:
+            user_docs = list(context.user_docs)
+        
+        console.info(f'[*] Human-in-the-Loop: Query for additional files')
+        console.info(f'[*] Current results: {len(context.docs)} documents from initial search')
+        console.info(f'[*] User-selected: {len(user_docs)} documents')
+        
+        while True:
+            print("\n" + "="*60)
+            print("Query More Files - Options:")
+            print("  semantic  - Perform semantic search with custom query")
+            print("  filename  - Search by filename/metadata pattern")
+            print("  show      - Show current initial search results")
+            print("  show-user - Show user-selected documents")
+            print("  done      - Proceed to ranking")
+            print("="*60)
+            
+            user_input = input("\nSelect option: ").strip().lower()
+            
+            if not user_input:
+                continue
+            
+            if user_input == "done":
+                console.info(f'[+] Proceeding with {len(user_docs)} user-selected documents')
+                break
+            
+            elif user_input == "show":
+                print("\nInitial Search Results:")
+                print("-" * 60)
+                for idx, (doc, score) in enumerate(context.docs):
+                    name = doc.metadata.get('name', 'Unknown')
+                    preview = doc.page_content[:100].replace('\n', ' ')
+                    print(f"{idx + 1}. {name} (score: {score:.3f})")
+                    print(f"   Preview: {preview}...")
+                continue
+            
+            elif user_input == "show-user":
+                if not user_docs:
+                    print("\nNo user-selected documents yet.")
+                else:
+                    print("\nUser-Selected Documents:")
+                    print("-" * 60)
+                    for idx, (doc, score) in enumerate(user_docs):
+                        name = doc.metadata.get('name', 'Unknown')
+                        preview = doc.page_content[:100].replace('\n', ' ')
+                        print(f"{idx + 1}. {name} (original score: {score:.3f})")
+                        print(f"   Preview: {preview}...")
+                continue
+            
+            elif user_input == "semantic":
+                query = input("Enter semantic search query: ").strip()
+                if not query:
+                    console.info("[-] Empty query, skipping")
+                    continue
+                
+                console.info(f'[*] Searching for: "{query}"')
+                search_results = await VectorStore.file_info.asimilarity_search_with_score(query, k=10)
+                
+                if not search_results:
+                    console.info(f'[-] No results found for query: "{query}"')
+                    continue
+                
+                print(f"\nFound {len(search_results)} results:")
+                print("-" * 60)
+                for idx, (doc, score) in enumerate(search_results):
+                    name = doc.metadata.get('name', 'Unknown')
+                    preview = doc.page_content[:100].replace('\n', ' ')
+                    print(f"{idx + 1}. {name} (score: {score:.3f})")
+                    print(f"   Preview: {preview}...")
+                
+                selection = input("\nSelect documents by index (comma-separated, e.g., 1,3,5) or 'all': ").strip()
+                
+                if not selection:
+                    continue
+                
+                if selection.lower() == 'all':
+                    indices = list(range(len(search_results)))
+                else:
+                    try:
+                        indices = [int(i.strip()) - 1 for i in selection.split(',')]
+                        indices = [i for i in indices if 0 <= i < len(search_results)]
+                    except ValueError:
+                        console.info("[-] Invalid selection format")
+                        continue
+                
+                for idx in indices:
+                    doc, score = search_results[idx]
+                    # Check if already selected
+                    already_exists = any(
+                        d.metadata.get('name') == doc.metadata.get('name') 
+                        for d, _ in user_docs
+                    )
+                    if not already_exists:
+                        user_docs.append((doc, score))
+                        console.info(f'[+] Added: {doc.metadata.get("name", "Unknown")}')
+                    else:
+                        console.info(f'[*] Already selected: {doc.metadata.get("name", "Unknown")}')
+            
+            elif user_input == "filename":
+                pattern = input("Enter filename pattern to search: ").strip()
+                if not pattern:
+                    console.info("[-] Empty pattern, skipping")
+                    continue
+                
+                console.info(f'[*] Searching for files matching: "{pattern}"')
+                
+                try:
+                    # Search using metadata filtering with contains
+                    search_results = VectorStore.file_info.get(
+                        where={"name": {"$contains": pattern}},
+                        limit=10
+                    )
+                    
+                    if not search_results or 'documents' not in search_results or not search_results['documents']:
+                        console.info(f'[-] No files found matching pattern: "{pattern}"')
+                        continue
+                    
+                    # Convert to format similar to similarity search
+                    docs_with_scores = []
+                    for i, doc_content in enumerate(search_results['documents']):
+                        metadata = search_results['metadatas'][i] if 'metadatas' in search_results else {}
+                        doc = Document(page_content=doc_content, metadata=metadata)
+                        # Use a neutral score for filename-based search
+                        docs_with_scores.append((doc, 0.5))
+                    
+                    print(f"\nFound {len(docs_with_scores)} results:")
+                    print("-" * 60)
+                    for idx, (doc, score) in enumerate(docs_with_scores):
+                        name = doc.metadata.get('name', 'Unknown')
+                        preview = doc.page_content[:100].replace('\n', ' ')
+                        print(f"{idx + 1}. {name}")
+                        print(f"   Preview: {preview}...")
+                    
+                    selection = input("\nSelect documents by index (comma-separated, e.g., 1,3,5) or 'all': ").strip()
+                    
+                    if not selection:
+                        continue
+                    
+                    if selection.lower() == 'all':
+                        indices = list(range(len(docs_with_scores)))
+                    else:
+                        try:
+                            indices = [int(i.strip()) - 1 for i in selection.split(',')]
+                            indices = [i for i in indices if 0 <= i < len(docs_with_scores)]
+                        except ValueError:
+                            console.info("[-] Invalid selection format")
+                            continue
+                    
+                    for idx in indices:
+                        doc, score = docs_with_scores[idx]
+                        # Check if already selected
+                        already_exists = any(
+                            d.metadata.get('name') == doc.metadata.get('name') 
+                            for d, _ in user_docs
+                        )
+                        if not already_exists:
+                            user_docs.append((doc, score))
+                            console.info(f'[+] Added: {doc.metadata.get("name", "Unknown")}')
+                        else:
+                            console.info(f'[*] Already selected: {doc.metadata.get("name", "Unknown")}')
+                
+                except Exception as e:
+                    logger.error(f"Error during filename search: {e}")
+                    console.info(f'[-] Error during search: {str(e)}')
+                    continue
+            
+            else:
+                console.info(f'[-] Unknown option: {user_input}')
+                continue
+        
+        return {'user_docs': user_docs}
+
     async def rank(self, context: WindowsInternalsContext):
         context.state_info.node.append(self.NODES.rank)
 
@@ -177,7 +359,34 @@ class WindowsInternals(Agent):
         score_map: dict[str, float] = {fs.file: fs.score for fs in result.files}
         ranked_docs = [(doc, score, score_map.get(doc.metadata.get("name"), 0.0)) for doc, score in context.docs]
 
+        # Add user-selected docs with score 10.0
+        user_ranked_docs = [(doc, score, 10.0) for doc, score in context.user_docs]
+        
+        # Merge and deduplicate based on filename
+        # User docs take precedence (score 10.0)
+        seen_names = set()
+        all_ranked_docs = []
+        
+        # Add user docs first (they have priority with score 10.0)
+        for doc, score, rank_score in user_ranked_docs:
+            name = doc.metadata.get("name", "")
+            if name and name not in seen_names:
+                seen_names.add(name)
+                all_ranked_docs.append((doc, score, rank_score))
+        
+        # Add initial docs, skipping duplicates
+        for doc, score, rank_score in ranked_docs:
+            name = doc.metadata.get("name", "")
+            if name and name not in seen_names:
+                seen_names.add(name)
+                all_ranked_docs.append((doc, score, rank_score))
+            elif not name:
+                # Include docs without names (though this shouldn't happen)
+                all_ranked_docs.append((doc, score, rank_score))
+        
+        console.info(f'[*] Final ranking: {len(all_ranked_docs)} documents ({len(user_ranked_docs)} user-selected)')
+
         return {'candidates': Candidates(query=context.query,
-                                         results=sorted(ranked_docs, key=lambda t: t[2],
+                                         results=sorted(all_ranked_docs, key=lambda t: t[2],
                                                         reverse=True))}
 
