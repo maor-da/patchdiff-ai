@@ -307,7 +307,7 @@ class Supervisor(Agent):
                     context.messages.append(AIMessage(content=r.content))
                 return self.NODES.assistant
 
-            case self.wi_agent.NODES.rank:
+            case self.wi_agent.NODES.rank | self.wi_agent.NODES.user_refinement:
                 # From windows internals agent
                 if not context.candidates.results:
                     raise RuntimeError(
@@ -326,10 +326,6 @@ class Supervisor(Agent):
                         for doc, score, rank in context.candidates.results
                     ]
                 )
-                console.info(
-                    f"\n{context.cve_details.cve} ranked candidates:\n{ranked_df}"
-                )
-
                 subjects = self._patch_candidates(context, ranked_df)
 
                 th = config.get("configurable", {}).get("threshold", Threshold())
@@ -524,7 +520,7 @@ class Supervisor(Agent):
                         return {"action": "reanalyze"}
 
                     case "change assistant":
-                        
+
                         selected = None
                         try:
                             available_models = LLM.list_models() or [selected]
@@ -559,7 +555,7 @@ class Supervisor(Agent):
                             self.llm = selected.model
                         except KeyboardInterrupt:
                             continue
-                        
+
                         continue
 
                 context.messages.append(HumanMessage(content=user_input))

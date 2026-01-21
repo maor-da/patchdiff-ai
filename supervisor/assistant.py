@@ -121,12 +121,6 @@ class Chatbot(Agent):
         # builder.add_edge(self.NODES.get_info, self.NODES.download)
         builder.add_edge(self.NODES.download, self.NODES.index)
 
-        builder.add_conditional_edges(self.NODES.index, self.add_file_info_if_needed,
-                                      [
-                                          self.NODES.add_file_info,
-                                          self.NODES.update_vs,
-                                      ])
-
         builder.add_edge(self.NODES.add_file_info, self.NODES.update_vs)
         builder.set_finish_point(self.NODES.update_vs)
 
