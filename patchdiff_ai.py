@@ -7,7 +7,7 @@ from supervisor.supervisor import Supervisor
 
 
 # snapshot2 = tracemalloc.take_snapshot()
-
+dbg = False
 
 async def run(cve: str, config: dict = None):
     pd_ai = Supervisor()
@@ -32,7 +32,7 @@ async def patch_wedensday_assistant(argv: list[str]):
         }
         console.info(f"[*] Start the system with config: {config}")
         tasks = [await asyncio.to_thread(run, cve=c, config=config) for c in cve_list]
-        results = await asyncio.gather(*tasks, return_exceptions=False)
+        results = await asyncio.gather(*tasks, return_exceptions=(not dbg))
         logger.debug(f"Results: {results}")
 
     console.info("[+] Done.")
@@ -40,6 +40,6 @@ async def patch_wedensday_assistant(argv: list[str]):
 
 if __name__ == "__main__":
     try:
-        asyncio.run(patch_wedensday_assistant(sys.argv[1:]), debug=True)
+        asyncio.run(patch_wedensday_assistant(sys.argv[1:]), debug=dbg)
     except (EOFError, KeyboardInterrupt):
         pass
