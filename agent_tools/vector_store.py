@@ -6,6 +6,11 @@ os.environ["CHROMA_TELEMETRY_ENABLED"] = "FALSE"
 from langchain_chroma import Chroma
 from common import AgentModels
 
+from chromadb.config import Settings
+
+settings = Settings(
+    anonymized_telemetry=False,
+)
 
 class VectorStore:
     file_info = Chroma(
@@ -14,6 +19,7 @@ class VectorStore:
         embedding_function=AgentModels.embedding_model.model,
         collection_metadata={"hnsw:space": "cosine"},
         create_collection_if_not_exists=True,
+        client_settings=settings,
     )
 
     func_logic = Chroma(
@@ -22,6 +28,7 @@ class VectorStore:
         embedding_function=AgentModels.embedding_model.model,
         collection_metadata={"hnsw:space": "cosine"},
         create_collection_if_not_exists=True,
+        client_settings=settings,
     )
 
     reports = Chroma(
@@ -30,4 +37,5 @@ class VectorStore:
         embedding_function=AgentModels.embedding_model.model,
         collection_metadata={"hnsw:space": "cosine"},
         create_collection_if_not_exists=True,
+        client_settings=settings,
     )

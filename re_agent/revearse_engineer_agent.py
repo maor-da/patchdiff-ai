@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -88,7 +89,12 @@ class ReverseEngineering(Agent):
             bindiff_path = f'{context.primary_file.path}.{context.secondary_file.kb}.BinDiff'
 
             console.info(f'[*] Analyze {context.primary_file.name} code block changes')
-            diff = await asyncio.to_thread(BinDiff.from_binexport_files, curr_binexport, prev_binexport, bindiff_path)
+            try:
+                diff = await asyncio.to_thread(BinDiff.from_binexport_files, curr_binexport, prev_binexport, bindiff_path)
+            except sqlite3.DatabaseError:
+                logger.warning(f'BinDiff database corrupted for {context.primary_file.name}, regenerating...')
+                diff = await asyncio.to_thread(BinDiff.from_binexport_files, curr_binexport, prev_binexport, bindiff_path, override=True)
+            
             if not diff:
                 logger.warning(f'Faild to bindiff {context.primary_file.name}')
 

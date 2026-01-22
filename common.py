@@ -6,6 +6,7 @@ import uuid
 import weakref
 from pathlib import Path
 import time
+import shutil
 from contextlib import ContextDecorator, contextmanager
 
 from azure.core.exceptions import ClientAuthenticationError
@@ -273,6 +274,106 @@ class Timer(ContextDecorator):
             f"[{self.name or 'time block'}] elapsed: {self.elapsed:.6f} seconds"
         )
         return False
+
+
+def safe_serialize(df: pl.DataFrame, path: Path, format: str = "binary") -> None:
+    """
+    Atomically serialize DataFrame to prevent corruption on disk full/crash.
+    
+    Uses write-to-temp-then-rename pattern to ensure atomicity:
+    1. Write to temporary file (.tmp suffix)
+    2. Flush and sync to disk
+    3. Atomically rename to final path
+    
+    If any step fails, the original file (if exists) remains intact.
+    
+    Args:
+        df: Polars DataFrame to serialize
+        path: Target file path
+        format: Serialization format (default: "binary")
+    
+    Raises:
+        OSError: If disk is full, permission denied, or write fails
+    """
+    path = Path(path)
+    temp_path = path.with_suffix(path.suffix + '.tmp')
+    
+    try:
+        # Ensure parent directory exists
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Check available disk space (optional pre-check)
+        try:
+            disk_usage = shutil.disk_usage(path.parent)
+            available_gb = disk_usage.free / (1024**3)
+            if available_gb < 0.1:  # Less than 100MB
+                logger.warning(
+                    f"Low disk space warning: {available_gb:.2f} GB available at {path.parent}"
+                )
+        except Exception as e:
+            logger.debug(f"Could not check disk space: {e}")
+        
+        # Serialize to temporary file
+        df.serialize(temp_path, format=format)
+        
+        # Ensure data is written to disk
+        # On Windows, we need to open with the right mode for fsync
+        try:
+            # Open in read-write mode to allow fsync on Windows
+            fd = os.open(temp_path, os.O_RDWR)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        except (OSError, AttributeError):
+            # If fsync fails or isn't available, continue anyway
+            # The file system will eventually flush
+            logger.debug("Could not fsync temp file, continuing anyway")
+        
+        # Atomically replace the target file
+        # os.replace() is atomic on both Windows and POSIX systems
+        os.replace(temp_path, path)
+        
+        logger.debug(f"Successfully serialized DataFrame to {path} ({path.stat().st_size:,} bytes)")
+        
+    except OSError as e:
+        # Disk full, permission denied, or other OS error
+        logger.error(f"Failed to serialize DataFrame to {path}: {e}")
+        
+        # Clean up temp file if it exists
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+                logger.debug(f"Cleaned up temporary file: {temp_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"Could not clean up temp file {temp_path}: {cleanup_error}")
+        
+        # Check if it's a disk full error
+        if e.errno == 28:  # ENOSPC - No space left on device
+            try:
+                disk_usage = shutil.disk_usage(path.parent)
+                available_gb = disk_usage.free / (1024**3)
+                console.error(
+                    f"Disk full error: Only {available_gb:.2f} GB available at {path.parent}. "
+                    "Please free up disk space and try again."
+                )
+            except Exception:
+                console.error("Disk full error. Please free up disk space and try again.")
+        
+        raise
+        
+    except Exception as e:
+        # Unexpected error during serialization
+        logger.error(f"Unexpected error serializing DataFrame to {path}: {e}")
+        
+        # Clean up temp file if it exists
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
+        
+        raise
 
 
 def get_patch_store_df():

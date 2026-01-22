@@ -1,5 +1,6 @@
 import asyncio
 import difflib
+import sqlite3
 from pathlib import Path
 
 import binexport
@@ -42,7 +43,12 @@ async def bindiff_files(subjects: pl.DataFrame, curr_kb, prev_kb):
             prev_binexport = prev_subject.path + '.BinExport'
             bindiff_path = f'{subject.path}.{prev_kb}.BinDiff'
 
-            diff = BinDiff.from_binexport_files(curr_binexport, prev_binexport, bindiff_path)
+            try:
+                diff = BinDiff.from_binexport_files(curr_binexport, prev_binexport, bindiff_path)
+            except sqlite3.DatabaseError:
+                logger.warning(f'BinDiff database corrupted for {subject.name}, regenerating...')
+                diff = BinDiff.from_binexport_files(curr_binexport, prev_binexport, bindiff_path, override=True)
+            
             if not diff:
                 logger.warning(f'Faild to bindiff {subject.name}')
                 continue

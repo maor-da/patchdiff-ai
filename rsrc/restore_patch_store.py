@@ -19,7 +19,7 @@ import polars as pl
 # Add parent directory to path to import project modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from common import PatchStoreEntry, console, logger, EXECUTABLE_EXTENSIONS
+from common import PatchStoreEntry, console, logger, EXECUTABLE_EXTENSIONS, safe_serialize
 from patch_analysis.files_collection import get_file_hash, get_pe_ms_id, version_tuple
 
 
@@ -443,7 +443,7 @@ def main():
     try:
         # DataFrame already created in step 3, just serialize it
         output_file.parent.mkdir(parents=True, exist_ok=True)
-        df.serialize(output_file, format="binary")
+        safe_serialize(df, output_file)
         
         console.info(f"[+] Successfully wrote database to: {output_file}")
         console.info(f"[+] File size: {output_file.stat().st_size:,} bytes")

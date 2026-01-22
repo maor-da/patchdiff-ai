@@ -25,6 +25,7 @@ from common import (
     console,
     LLM,
     save_to_file,
+    safe_serialize,
 )
 from defaultdataclass import defaultdataclass, field
 
@@ -265,7 +266,7 @@ class Supervisor(Agent):
                         [patch_store_df, *results], how="vertical_relaxed"
                     )
             finally:
-                patch_store_df.serialize(Path("db/.patch_store_df"), format="binary")
+                safe_serialize(patch_store_df, Path("db/.patch_store_df"))
                 with pl.Config(tbl_cols=-1, set_tbl_width_chars=300):
                     logger.debug(patch_store_df)
 

@@ -6,7 +6,7 @@ from typing import Generator
 
 import pefile
 
-from common import get_winsxs, logger, EXECUTABLE_EXTENSIONS, resource_lock, console
+from common import get_winsxs, logger, EXECUTABLE_EXTENSIONS, resource_lock, console, safe_serialize
 import polars as pl
 from dataclasses import dataclass, field
 
@@ -125,7 +125,7 @@ def get_update_dataframe(kb: str, paths: list[Path] | Path, collect_hash=True, c
 
             df = generate_df(kb, paths, collect_hash)
             if cache:
-                df.serialize(cache, format="binary")
+                safe_serialize(df, cache)
     else:
         df = generate_df(kb, paths, collect_hash)
 
