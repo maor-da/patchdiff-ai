@@ -2,7 +2,7 @@ db*/
 .venv/
 venv/
 .idea/
-**/_temp/
+**/_temp*/
 patch_store/
 **/.os
 **/*.bin
