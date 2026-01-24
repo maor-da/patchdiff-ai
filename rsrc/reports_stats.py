@@ -18,8 +18,9 @@ from dataclasses import dataclass
 # =============================================================================
 
 # Quality thresholds and scoring parameters
-DEFAULT_CONFIDENCE_THRESHOLD = 0.605  # Minimum confidence for high-quality filtering
-DEFAULT_CHANGE_COUNT_THRESHOLD = 30  # Baseline for quality score calculation
+DEFAULT_CONFIDENCE_THRESHOLD = 0.6  # Minimum confidence for high-quality filtering
+DEFAULT_CHANGE_COUNT_THRESHOLD = 50  # Baseline for quality score calculation
+DEFAULT_QUALITY_SCORE_THRESHOLD = 0.4  # Minimum quality score for high-quality filtering
 
 # Display limits
 TOP_REPORTS_LIMIT = 10
@@ -53,10 +54,12 @@ class QualityThresholds:
     
     confidence: Minimum confidence threshold for filtering high-quality reports
     change_count: Baseline value for quality score calculation (not used for filtering)
+    quality_score: Minimum quality score threshold for filtering high-quality reports
     """
 
     confidence: float = DEFAULT_CONFIDENCE_THRESHOLD
     change_count: int = DEFAULT_CHANGE_COUNT_THRESHOLD
+    quality_score: float = DEFAULT_QUALITY_SCORE_THRESHOLD
 
 
 # =============================================================================
@@ -124,17 +127,20 @@ def _compute_high_quality_metrics(
     """
     Filter and analyze high-confidence reports.
 
-    Filters reports based on confidence threshold only. The change_count
-    is not used for filtering but contributes to quality score calculation.
+    Filters reports based on both confidence and quality_score thresholds.
+    The change_count is not used for filtering but contributes to quality score calculation.
 
     Args:
-        df: Report DataFrame
-        thresholds: Quality thresholds (only confidence is used for filtering)
+        df: Report DataFrame with quality_score column
+        thresholds: Quality thresholds (confidence and quality_score used for filtering)
 
     Returns:
         Tuple of (high_quality_df, metrics_dict)
     """
-    high_quality_mask = pl.col("confidence") > thresholds.confidence
+    high_quality_mask = (
+        (pl.col("confidence") > thresholds.confidence) &
+        (pl.col("quality_score") > thresholds.quality_score)
+    )
     high_quality_df = df.filter(high_quality_mask)
 
     metrics = {
@@ -376,18 +382,20 @@ def analyze_reports(
     df: pl.DataFrame,
     confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
     change_count_threshold: int = DEFAULT_CHANGE_COUNT_THRESHOLD,
+    quality_score_threshold: float = DEFAULT_QUALITY_SCORE_THRESHOLD,
 ) -> Dict:
     """
     Analyze vulnerability reports and compute comprehensive statistics.
 
     Quality scoring uses the formula: confidence * (baseline / (baseline + change_count))
-    where baseline = change_count_threshold (default 10). This ensures high confidence
+    where baseline = change_count_threshold (default 50). This ensures high confidence
     and low change counts produce higher quality scores.
 
     Args:
         df: DataFrame containing report metadata
         confidence_threshold: Minimum confidence for filtering high-quality reports
         change_count_threshold: Baseline for quality score calculation (not a filter)
+        quality_score_threshold: Minimum quality score for filtering high-quality reports
 
     Returns:
         Dictionary containing analysis results with the following keys:
@@ -396,7 +404,7 @@ def analyze_reports(
             - By dimension: by_kb, by_model, by_folder
             - Rankings: top_quality_reports, file_hotspots, etc.
     """
-    thresholds = QualityThresholds(confidence_threshold, change_count_threshold)
+    thresholds = QualityThresholds(confidence_threshold, change_count_threshold, quality_score_threshold)
 
     # Calculate quality scores
     df_with_quality = _calculate_quality_score(df)
@@ -552,6 +560,7 @@ def print_analysis_report(
     analysis: Dict,
     confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
     change_count_threshold: int = DEFAULT_CHANGE_COUNT_THRESHOLD,
+    quality_score_threshold: float = DEFAULT_QUALITY_SCORE_THRESHOLD,
 ) -> None:
     """
     Print formatted analysis report.
@@ -560,6 +569,7 @@ def print_analysis_report(
         analysis: Analysis results dictionary from analyze_reports()
         confidence_threshold: Confidence threshold used for filtering
         change_count_threshold: Baseline used for quality score calculation
+        quality_score_threshold: Quality score threshold used for filtering
     """
     print("\n" + "=" * 80)
     print("VULNERABILITY REPORT ANALYSIS")
@@ -588,14 +598,14 @@ def print_analysis_report(
     )
     print(f"\nAverage Quality Score: {analysis['avg_quality_score']:.3f}")
 
-    # High Confidence Reports
+    # High Quality Reports
     print(
-        f"\nHIGH CONFIDENCE REPORTS (confidence > {confidence_threshold})"
+        f"\nHIGH QUALITY REPORTS (confidence > {confidence_threshold} AND quality_score > {quality_score_threshold})"
     )
     print("-" * 80)
     print(f"Quality Score Baseline (for scoring): {change_count_threshold}")
-    print(f"Total High Confidence Reports: {analysis['high_quality_reports_count']}")
-    print(f"Unique High Confidence CVEs: {analysis['high_quality_unique_cves']}")
+    print(f"Total High Quality Reports: {analysis['high_quality_reports_count']}")
+    print(f"Unique High Quality CVEs: {analysis['high_quality_unique_cves']}")
     print("\nHigh Confidence CVEs by Folder:")
     print(analysis["high_quality_by_folder"])
 
