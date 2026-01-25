@@ -104,7 +104,7 @@ def collect_cves(cvrf: dict, wanted: set[str]) -> list[dict]:
             affected.update(pids)
         if affected & wanted:
             t = v["Title"]
-            cvss = [(x or {}).get('BaseScore', 0) for x in v["CVSSScoreSets"] if set(x["ProductID"]) & wanted]
+            cvss = ([(x or {}).get('BaseScore', 0) for x in v["CVSSScoreSets"] if set(x["ProductID"]) & wanted] or [None])[0]
             rows.append(
                 {"CVE": v["CVE"], "CVSS": cvss, "Title": t["Value"] if isinstance(t, dict) else t}
             )

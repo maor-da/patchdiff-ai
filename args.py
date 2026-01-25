@@ -75,6 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="CVE identifier (e.g. CVE-2025-32713).",
         type=cve_type,
     )
+    cve_p.add_argument(
+        "--eval",
+        action="store_true",
+        help="Enable evaluation mode.",
+    )
 
     # month MODE
     month_p = sub.add_parser("month", help="Generate Patch Tuesday batch report.")
@@ -101,6 +106,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=set(),
     )
 
+    month_p.add_argument(
+        "--eval",
+        action="store_true",
+        help="Enable evaluation mode.",
+    )
+
     return p
 
 
@@ -123,8 +134,8 @@ def print_report(cve, to_file=False, monthly_path: str = None):
 
 
 def get_month_cve(args):
-    platform_name = args.platform_name if "platform_name" in args else None
-    platform_ids = args.platform_ids if "platform_ids" in args else set()
+    platform_name = getattr(args, "platform_name", None)
+    platform_ids = getattr(args, "platform_ids", set())
 
     if not (platform_name or platform_ids):
         if input("Filter by name? [y/N] ").lower().startswith("y"):
@@ -139,7 +150,7 @@ def get_month_cve(args):
     console.info(f"List {args.month} CVEs for {name} - {ids}\n\n {print_cve_list(df)}")
     cve = df.get_column("CVE").to_list()
 
-    return cve, name, ids
+    return cve, name, ids, df
 
 
 def get_cve_list(argv: list[str]) -> list[str]:
@@ -147,13 +158,17 @@ def get_cve_list(argv: list[str]) -> list[str]:
 
     if args.mode == "get_cached_report":
         if args.cve:
-            print_report(args.cve)
+            print_report(args.cve, to_file=True)
         elif args.month:
             cve, name, ids = get_month_cve(args)
             for c in cve:
-                os_name = ''.join(x.replace(' ', '_') for x in (name or []))
-                os_id = ''.join(str(x) for x in (ids or []))
-                print_report(c, to_file=True, monthly_path=f"{args.month}.{os_name}.{os_id}".lower())
+                os_name = "".join(x.replace(" ", "_") for x in (name or []))
+                os_id = "".join(str(x) for x in (ids or []))
+                print_report(
+                    c,
+                    to_file=True,
+                    monthly_path=f"{args.month}.{os_name}.{os_id}".lower(),
+                )
 
         return []
 
@@ -171,4 +186,4 @@ def get_cve_list(argv: list[str]) -> list[str]:
         ):
             return []
 
-    return cve
+    return cve, args

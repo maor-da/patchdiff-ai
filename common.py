@@ -30,6 +30,7 @@ from pydantic import BaseModel
 from defaultdataclass import defaultdataclass, field
 
 from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from langgraph.graph import add_messages
@@ -549,11 +550,23 @@ def init_azure_models(azure_credential):
     )
 
     LLM.gpt_5_2 = Model(
-        name="azure.gpt-5.2",
+        name="azure.gpt-5.2", # $1.75 per 1M
         model=AzureChatOpenAI(
             model="gpt-5.2",
             azure_deployment="gpt-5.2",
-            api_version="2024-12-01-preview",
+            api_version="2025-01-01-preview",
+            azure_endpoint=endpoint,
+            azure_ad_token_provider=azure_token_provider,
+            streaming=False,
+            # model_kwargs={'max_completion_tokens': 100000}
+        ),
+    )
+    LLM.gpt_5_2_codex = Model(
+        name="azure.gpt-5.2-codex", # $1.75 per 1M
+        model=AzureChatOpenAI(
+            model="gpt-5.2-codex",
+            azure_deployment="gpt-5.2-codex",
+            api_version="2025-01-01-preview",
             azure_endpoint=endpoint,
             azure_ad_token_provider=azure_token_provider,
             streaming=False,
@@ -561,7 +574,7 @@ def init_azure_models(azure_credential):
         ),
     )
     LLM.o3 = Model(
-        name="azure.o3",
+        name="azure.o3", # $2 per 1M
         model=AzureChatOpenAI(
             model="o3",
             azure_deployment="o3",
@@ -572,8 +585,20 @@ def init_azure_models(azure_credential):
             # model_kwargs={'max_completion_tokens': 100000}
         ),
     )
+    LLM.gpt_4o = Model(
+        name="azure.4o", # $2.5 per 1M
+        model=AzureChatOpenAI(
+            model="gpt-4o",
+            azure_deployment="gpt-4o",
+            api_version="2024-12-01-preview",
+            azure_endpoint=endpoint,
+            azure_ad_token_provider=azure_token_provider,
+            streaming=False,
+            # model_kwargs={'max_completion_tokens': 100000}
+        ),
+    )
     LLM.o4_mini = Model(
-        name="azure.o4-mini",
+        name="azure.o4-mini", # $1.1 per 1M
         model=AzureChatOpenAI(
             model="o4-mini",
             azure_deployment="o4-mini",
@@ -585,7 +610,7 @@ def init_azure_models(azure_credential):
         ),
     )
     LLM.o3_mini = Model(
-        name="azure.o3-mini",
+        name="azure.o3-mini", # $1.1 per 1M
         model=AzureChatOpenAI(
             model="o3-mini",
             azure_deployment="o3-mini",
@@ -597,7 +622,7 @@ def init_azure_models(azure_credential):
         ),
     )
     LLM.nano = Model(
-        name="azure.gpt-4.1-nano",
+        name="azure.gpt-4.1-nano", # $0.1 per 1M
         model=AzureChatOpenAI(
             max_tokens=250,
             model="gpt-4.1-nano",
@@ -611,7 +636,7 @@ def init_azure_models(azure_credential):
         ),
     )
     LLM.mini = Model(
-        name="azure.gpt-4.1-mini",
+        name="azure.gpt-4.1-mini", # $0.4 per 1M
         model=AzureChatOpenAI(
             model="gpt-4.1-mini",
             azure_deployment="gpt-4.1-mini",
@@ -640,15 +665,51 @@ def init_anthropic_models():
         return
 
     LLM.claude_sonnet = Model(
-        name="claude.sonnet",
+        name="claude.sonnet", # $3 per 1M
         model=ChatAnthropic(
             model="claude-sonnet-4-5",
         ),
     )
+    LLM.claude_haiku_4_5 = Model(
+        name="claude.haiku-4.5", # $1 per 1M
+        model=ChatAnthropic(
+            model="claude-haiku-4-5-20251001",
+        ),
+    )
     LLM.claude_opus = Model(
-        name="claude.opus",
+        name="claude.opus", # 5$ per 1M
         model=ChatAnthropic(
             model="claude-opus-4-5",
+        ),
+    )
+
+
+def init_gemini_models():
+    if not os.environ.get("GOOGLE_API_KEY"):
+        return
+
+    LLM.gemini_2_5_flash = Model(
+        name="gemini.2.5-flash", # $0.3 per 1M
+        model=ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+        ),
+    )
+    LLM.gemini_2_5_pro = Model(
+        name="gemini.2.5-pro", # $1.25 per 1M
+        model=ChatGoogleGenerativeAI(
+            model="gemini-2.5-pro",
+        ),
+    )
+    LLM.gemini_3_flash = Model(
+        name="gemini.3-flash", # $0.5 per 1M
+        model=ChatGoogleGenerativeAI(
+            model="gemini-3-flash-preview",
+        ),
+    )
+    LLM.gemini_3_pro = Model(
+        name="gemini.3-pro", # $2 per 1M
+        model=ChatGoogleGenerativeAI(
+            model="gemini-3-pro-preview",
         ),
     )
 
@@ -671,6 +732,7 @@ try:
 
     init_azure_models(azure_credential)
     init_anthropic_models()
+    init_gemini_models()
 
     init_agents_models()
 

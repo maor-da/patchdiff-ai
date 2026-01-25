@@ -6,7 +6,7 @@ venv/
 patch_store/
 **/.os
 **/*.bin
-log*.txt
+log.txt*
 logs/
 __pycache__/
 poc/

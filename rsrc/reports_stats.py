@@ -1,65 +1,31 @@
 """
 Vulnerability Report Analysis Module
 
-This module provides tools for indexing and analyzing vulnerability report files.
-It extracts metadata from report files, computes quality metrics, and generates
-comprehensive statistics for patch analysis.
+Indexes vulnerability report files, computes quality metrics, and generates statistics for patch analysis.
 """
 
 import polars as pl
 import json
 from pathlib import Path
-from typing import Dict, Tuple
-from dataclasses import dataclass
+from typing import Dict, List, Tuple, Optional
 
 
 # =============================================================================
 # CONFIGURATION CONSTANTS
 # =============================================================================
 
-# Quality thresholds and scoring parameters
-DEFAULT_CONFIDENCE_THRESHOLD = 0.6  # Minimum confidence for high-quality filtering
-DEFAULT_CHANGE_COUNT_THRESHOLD = 50  # Baseline for quality score calculation
-DEFAULT_QUALITY_SCORE_THRESHOLD = 0.4  # Minimum quality score for high-quality filtering
+DEFAULT_CONFIDENCE_THRESHOLD = 0.6
+DEFAULT_CHANGE_COUNT_THRESHOLD = 50
+DEFAULT_QUALITY_SCORE_THRESHOLD = 0.4
 
-# Display limits
-TOP_REPORTS_LIMIT = 10
+TOP_REPORTS_LIMIT = 20
 TOP_HOTSPOTS_LIMIT = 20
 
-# Column groups for report display
-REPORT_COLUMNS = [
-    "cve",
-    "file",
-    "kb",
-    "confidence",
-    "change_count",
-    "folder",
-    "model_name",
-]
+REPORT_COLUMNS = ["cve", "file", "kb", "cvss", "confidence", "change_count", "folder", "model_name"]
 QUALITY_REPORT_COLUMNS = REPORT_COLUMNS + ["quality_score"]
 
-# Polars display configuration
 pl.Config.set_tbl_cols(-1)
 pl.Config.set_tbl_rows(20)
-
-
-# =============================================================================
-# TYPE DEFINITIONS
-# =============================================================================
-
-
-@dataclass
-class QualityThresholds:
-    """Quality thresholds for report analysis.
-    
-    confidence: Minimum confidence threshold for filtering high-quality reports
-    change_count: Baseline value for quality score calculation (not used for filtering)
-    quality_score: Minimum quality score threshold for filtering high-quality reports
-    """
-
-    confidence: float = DEFAULT_CONFIDENCE_THRESHOLD
-    change_count: int = DEFAULT_CHANGE_COUNT_THRESHOLD
-    quality_score: float = DEFAULT_QUALITY_SCORE_THRESHOLD
 
 
 # =============================================================================
@@ -67,44 +33,23 @@ class QualityThresholds:
 # =============================================================================
 
 
-def _calculate_quality_score(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Calculate quality score for reports using Scaled Inverse with Baseline formula.
+def _get_unique_cves_with_cvss(df: pl.DataFrame) -> pl.DataFrame:
+    """Deduplicate by CVE and filter for non-null CVSS values."""
+    return df.unique(subset=["cve"], keep="first").filter(pl.col("cvss").is_not_null())
 
-    Quality score formula: confidence * (baseline / (baseline + change_count))
-    where baseline = DEFAULT_CHANGE_COUNT_THRESHOLD (10)
-    
-    This formula ensures:
-    - Higher confidence → higher score
-    - Lower change_count → higher score
-    - Scores are bounded to [0, 1]
-    - Best possible score ≈ 0.909 (confidence=1.0, change_count=1)
-    - Score gracefully decays as change_count increases
 
-    Args:
-        df: DataFrame with 'confidence' and 'change_count' columns
-
-    Returns:
-        DataFrame with added 'quality_score' column
-    """
-    baseline = DEFAULT_CHANGE_COUNT_THRESHOLD
+def _calculate_quality_score(df: pl.DataFrame, baseline: int = DEFAULT_CHANGE_COUNT_THRESHOLD) -> pl.DataFrame:
+    """Add quality_score column: confidence * (baseline / (baseline + change_count))"""
     return df.with_columns(
-        (
-            pl.col("confidence") * (baseline / (baseline + pl.col("change_count")))
-        ).alias("quality_score")
+        (pl.col("confidence") * (baseline / (baseline + pl.col("change_count")))).alias("quality_score")
     )
 
 
 def _compute_basic_stats(df: pl.DataFrame) -> Dict:
-    """
-    Compute basic statistical metrics.
-
-    Args:
-        df: Report DataFrame
-
-    Returns:
-        Dictionary with basic statistics
-    """
+    """Compute basic statistics including CVSS metrics."""
+    cvss_df = _get_unique_cves_with_cvss(df)
+    has_cvss = len(cvss_df) > 0
+    
     return {
         "total_reports": len(df),
         "unique_cves": df["cve"].n_unique(),
@@ -118,259 +63,213 @@ def _compute_basic_stats(df: pl.DataFrame) -> Dict:
         "median_change_count": df["change_count"].median(),
         "min_change_count": df["change_count"].min(),
         "max_change_count": df["change_count"].max(),
+        "avg_cvss": cvss_df["cvss"].mean() if has_cvss else None,
+        "median_cvss": cvss_df["cvss"].median() if has_cvss else None,
+        "min_cvss": cvss_df["cvss"].min() if has_cvss else None,
+        "max_cvss": cvss_df["cvss"].max() if has_cvss else None,
+        "high_cvss_count": (cvss_df["cvss"] >= 7.0).sum() if has_cvss else 0,
+        "critical_cvss_count": (cvss_df["cvss"] >= 9.0).sum() if has_cvss else 0,
+        "cvss_available_count": len(cvss_df),
     }
 
 
-def _compute_high_quality_metrics(
-    df: pl.DataFrame, thresholds: QualityThresholds
-) -> Tuple[pl.DataFrame, Dict]:
-    """
-    Filter and analyze high-confidence reports.
-
-    Filters reports based on both confidence and quality_score thresholds.
-    The change_count is not used for filtering but contributes to quality score calculation.
-
-    Args:
-        df: Report DataFrame with quality_score column
-        thresholds: Quality thresholds (confidence and quality_score used for filtering)
-
-    Returns:
-        Tuple of (high_quality_df, metrics_dict)
-    """
-    high_quality_mask = (
-        (pl.col("confidence") > thresholds.confidence) &
-        (pl.col("quality_score") > thresholds.quality_score)
-    )
-    high_quality_df = df.filter(high_quality_mask)
-
-    metrics = {
-        "high_quality_reports_count": len(high_quality_df),
-        "high_quality_unique_cves": (
-            high_quality_df["cve"].n_unique() if len(high_quality_df) > 0 else 0
-        ),
+def _compute_quality_distribution(df: pl.DataFrame) -> Dict:
+    """Compute quality score quartile distribution."""
+    qs = df["quality_score"]
+    return {
+        "quality_q25": qs.quantile(0.25),
+        "quality_q50": qs.quantile(0.50),
+        "quality_q75": qs.quantile(0.75),
     }
 
-    return high_quality_df, metrics
+
+def _compute_correlations(df: pl.DataFrame) -> Dict:
+    """Compute correlation metrics between other metrics and Confidence."""
+    conf_df = df.filter(pl.col("confidence").is_not_null())
+    if len(conf_df) < 2:
+        return {
+            "cvss_confidence_corr": None,
+            "change_count_confidence_corr": None,
+            "quality_score_confidence_corr": None,
+        }
+    
+    cvss_corr = conf_df.filter(pl.col("cvss").is_not_null()).select(pl.corr("cvss", "confidence")).item() if len(conf_df.filter(pl.col("cvss").is_not_null())) >= 2 else None
+    change_corr = conf_df.select(pl.corr("change_count", "confidence")).item()
+    quality_corr = conf_df.select(pl.corr("quality_score", "confidence")).item()
+    
+    return {
+        "cvss_confidence_corr": cvss_corr,
+        "change_count_confidence_corr": change_corr,
+        "quality_score_confidence_corr": quality_corr,
+    }
 
 
-def _compute_folder_analysis(
-    df: pl.DataFrame, high_quality_df: pl.DataFrame
-) -> Tuple[pl.DataFrame, pl.DataFrame]:
-    """
-    Analyze reports by folder with high-quality metrics.
-
-    Args:
-        df: Full report DataFrame
-        high_quality_df: Filtered high-quality reports
-
-    Returns:
-        Tuple of (high_quality_by_folder, temporal_analysis)
-    """
-    # Total CVEs by folder
-    total_cves_by_folder = df.group_by("folder").agg(
-        [pl.col("cve").n_unique().alias("total_unique_cves")]
-    )
-
-    # High-quality CVEs by folder
-    high_quality_cves_by_folder = high_quality_df.group_by("folder").agg(
-        [
-            pl.col("cve").n_unique().alias("high_quality_unique_cves"),
-            pl.col("cve").count().alias("high_quality_reports"),
-            pl.col("confidence").mean().alias("avg_confidence"),
-            pl.col("change_count").mean().alias("avg_change_count"),
-            pl.col("quality_score").mean().alias("avg_quality_score"),
-        ]
-    )
-
-    # Combine results
-    high_quality_by_folder = (
-        total_cves_by_folder.join(high_quality_cves_by_folder, on="folder", how="left")
-        .select(
-            [
-                "folder",
-                pl.col("high_quality_unique_cves").fill_null(0),
-                "total_unique_cves",
-                pl.col("high_quality_reports").fill_null(0),
-                "avg_confidence",
-                "avg_change_count",
-                "avg_quality_score",
-            ]
-        )
-        .sort("folder")
-    )
-
-    # Temporal analysis
-    temporal_analysis = (
-        df.group_by("folder")
-        .agg(
-            [
-                pl.col("cve").count().alias("total_reports"),
-                pl.col("cve").n_unique().alias("unique_cves"),
-                pl.col("confidence").mean().alias("avg_confidence"),
-                pl.col("change_count").mean().alias("avg_change_count"),
-                pl.col("quality_score").mean().alias("avg_quality_score"),
-                pl.col("date").min().alias("earliest_date"),
-                pl.col("date").max().alias("latest_date"),
-            ]
-        )
-        .sort("folder")
-    )
-
-    return high_quality_by_folder, temporal_analysis
+def _compute_efficiency_metrics(df: pl.DataFrame) -> Dict:
+    """Compute patch efficiency metrics."""
+    unique_cves = df["cve"].n_unique()
+    unique_files = df["file"].n_unique()
+    
+    # Files per CVE (scattered patches)
+    files_per_cve_df = df.group_by("cve").agg(pl.col("file").n_unique().alias("file_count"))
+    
+    return {
+        "cves_per_file": unique_cves / unique_files if unique_files > 0 else 0,
+        "files_per_cve_avg": files_per_cve_df["file_count"].mean(),
+        "files_per_cve_median": files_per_cve_df["file_count"].median(),
+        "files_per_cve_max": files_per_cve_df["file_count"].max(),
+    }
 
 
-def _compute_kb_analysis(
-    df: pl.DataFrame, thresholds: QualityThresholds
-) -> Tuple[pl.DataFrame, pl.DataFrame]:
-    """
-    Analyze reports by KB (Knowledge Base patch).
-
-    Args:
-        df: Report DataFrame
-        thresholds: Quality thresholds
-
-    Returns:
-        Tuple of (basic_kb_stats, kb_quality_assessment)
-    """
-    basic_stats = (
-        df.group_by("kb")
-        .agg(
-            [
-                pl.col("cve").count().alias("report_count"),
-                pl.col("cve").n_unique().alias("unique_cves"),
-                pl.col("confidence").mean().alias("avg_confidence"),
-                pl.col("change_count").mean().alias("avg_change_count"),
-                pl.col("quality_score").mean().alias("avg_quality_score"),
-            ]
-        )
-        .sort("kb")
-    )
-
-    quality_assessment = (
-        df.group_by("kb")
-        .agg(
-            [
-                pl.col("cve").n_unique().alias("unique_cves"),
-                pl.col("file").n_unique().alias("unique_files"),
-                (
-                    pl.col("cve").n_unique().cast(pl.Float64)
-                    / pl.col("file").n_unique()
-                ).alias("cve_per_file_ratio"),
-                (pl.col("confidence") > thresholds.confidence)
-                .sum()
-                .alias("high_confidence_count"),
-                pl.col("confidence").mean().alias("avg_confidence"),
-            ]
-        )
-        .sort("high_confidence_count", descending=True)
-    )
-
-    return basic_stats, quality_assessment
+def _compute_high_quality_metrics(df: pl.DataFrame, conf_thresh: float, qual_thresh: float) -> Tuple[pl.DataFrame, Dict]:
+    """Filter and count high-quality reports."""
+    hq_df = df.filter((pl.col("confidence") > conf_thresh) & (pl.col("quality_score") > qual_thresh))
+    return hq_df, {
+        "high_quality_reports_count": len(hq_df),
+        "high_quality_unique_cves": hq_df["cve"].n_unique() if len(hq_df) > 0 else 0,
+    }
 
 
-def _compute_model_analysis(
-    df: pl.DataFrame, thresholds: QualityThresholds
-) -> Tuple[pl.DataFrame, pl.DataFrame]:
-    """
-    Analyze reports by AI model.
+def _compute_group_stats(df: pl.DataFrame, group_col: str, conf_thresh: float, change_thresh: int) -> Tuple[pl.DataFrame, pl.DataFrame]:
+    """Generic aggregation by group column (kb/model/folder)."""
+    filtered_df = df.filter(pl.col(group_col).is_not_null())
+    
+    if len(filtered_df) == 0:
+        return pl.DataFrame(), pl.DataFrame()
+    
+    basic = filtered_df.group_by(group_col).agg([
+        pl.col("cve").count().alias("report_count"),
+        pl.col("cve").n_unique().alias("unique_cves"),
+        pl.col("confidence").mean().alias("avg_confidence"),
+        pl.col("change_count").mean().alias("avg_change_count"),
+        pl.col("quality_score").mean().alias("avg_quality_score"),
+        pl.col("cvss").mean().alias("avg_cvss"),
+    ]).sort(group_col)
+    
+    quality = filtered_df.group_by(group_col).agg([
+        pl.col("cve").n_unique().alias("unique_cves"),
+        pl.col("file").n_unique().alias("unique_files"),
+        (pl.col("cve").n_unique().cast(pl.Float64) / pl.col("file").n_unique()).alias("cve_per_file_ratio"),
+        (pl.col("confidence") > conf_thresh).sum().alias("high_confidence_count"),
+        (pl.col("change_count") < change_thresh).sum().alias("low_complexity_count"),
+        pl.col("confidence").mean().alias("avg_confidence"),
+        pl.col("quality_score").mean().alias("avg_quality_score"),
+        pl.col("cvss").mean().alias("avg_cvss"),
+    ]).sort("avg_quality_score", descending=True)
+    
+    return basic, quality
 
-    Args:
-        df: Report DataFrame
-        thresholds: Quality thresholds
 
-    Returns:
-        Tuple of (basic_model_stats, model_quality_comparison)
-    """
-    model_df = df.filter(pl.col("model_name").is_not_null())
+def _compute_folder_analysis(df: pl.DataFrame, hq_df: pl.DataFrame) -> pl.DataFrame:
+    """Analyze high-quality reports by folder."""
+    total = df.group_by("folder").agg([pl.col("cve").n_unique().alias("total_unique_cves")])
+    hq = hq_df.group_by("folder").agg([
+        pl.col("cve").n_unique().alias("high_quality_unique_cves"),
+        pl.col("cve").count().alias("high_quality_reports"),
+        pl.col("confidence").mean().alias("avg_confidence"),
+        pl.col("change_count").mean().alias("avg_change_count"),
+        pl.col("quality_score").mean().alias("avg_quality_score"),
+        pl.col("cvss").mean().alias("avg_cvss"),
+    ])
+    
+    return total.join(hq, on="folder", how="left").select([
+        "folder",
+        pl.col("high_quality_unique_cves").fill_null(0),
+        "total_unique_cves",
+        pl.col("high_quality_reports").fill_null(0),
+        "avg_confidence",
+        "avg_change_count",
+        "avg_quality_score",
+        "avg_cvss",
+    ]).sort("folder")
 
-    if len(model_df) == 0:
-        return pl.DataFrame(), None
 
-    basic_stats = (
-        model_df.group_by("model_name")
-        .agg(
-            [
-                pl.col("cve").count().alias("report_count"),
-                pl.col("confidence").mean().alias("avg_confidence"),
-                pl.col("change_count").mean().alias("avg_change_count"),
-            ]
-        )
-        .sort("model_name")
-    )
-
-    model_quality = (
-        _calculate_quality_score(model_df)
-        .group_by("model_name")
-        .agg(
-            [
-                pl.len().alias("report_count"),
-                pl.col("confidence").mean().alias("avg_confidence"),
-                pl.col("change_count").mean().alias("avg_change_count"),
-                pl.col("quality_score").mean().alias("avg_quality_score"),
-                (pl.col("confidence") > thresholds.confidence)
-                .sum()
-                .alias("high_confidence_count"),
-                (pl.col("change_count") < thresholds.change_count)
-                .sum()
-                .alias("low_complexity_count"),
-            ]
-        )
-        .sort("avg_quality_score", descending=True)
-    )
-
-    return basic_stats, model_quality
+def _compute_temporal_analysis(df: pl.DataFrame) -> pl.DataFrame:
+    """Temporal analysis by folder."""
+    return df.group_by("folder").agg([
+        pl.col("cve").count().alias("total_reports"),
+        pl.col("cve").n_unique().alias("unique_cves"),
+        pl.col("confidence").mean().alias("avg_confidence"),
+        pl.col("change_count").mean().alias("avg_change_count"),
+        pl.col("quality_score").mean().alias("avg_quality_score"),
+        pl.col("cvss").mean().alias("avg_cvss"),
+        pl.col("date").min().alias("earliest_date"),
+        pl.col("date").max().alias("latest_date"),
+    ]).sort("folder")
 
 
 def _compute_file_hotspots(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Identify most frequently patched files.
-
-    Args:
-        df: Report DataFrame with quality_score column
-
-    Returns:
-        DataFrame with file hotspot analysis including quality scores
-    """
-    return (
-        df.group_by("file")
-        .agg(
-            [
-                pl.col("cve").n_unique().alias("cve_count"),
-                pl.col("cve").count().alias("total_patches"),
-                pl.col("confidence").mean().alias("avg_confidence"),
-                pl.col("change_count").mean().alias("avg_change_count"),
-                pl.col("quality_score").mean().alias("avg_quality_score"),
-            ]
-        )
-        .sort("cve_count", descending=True)
-        .head(TOP_HOTSPOTS_LIMIT)
-    )
+    """Identify most frequently patched files."""
+    return df.group_by("file").agg([
+        pl.col("cve").n_unique().alias("cve_count"),
+        pl.col("cve").count().alias("total_patches"),
+        pl.col("confidence").mean().alias("avg_confidence"),
+        pl.col("change_count").mean().alias("avg_change_count"),
+        pl.col("quality_score").mean().alias("avg_quality_score"),
+        pl.col("cvss").mean().alias("avg_cvss"),
+    ]).sort("cve_count", descending=True).head(TOP_HOTSPOTS_LIMIT)
 
 
-def _compute_top_reports(df_with_quality: pl.DataFrame) -> Dict[str, pl.DataFrame]:
-    """
-    Extract top and bottom quality reports.
+def _compute_file_kb_cve_concentration(df: pl.DataFrame) -> pl.DataFrame:
+    """Identify files with most CVEs patched in a single KB update."""
+    return df.group_by(["file", "kb"]).agg([
+        pl.col("cve").n_unique().alias("cve_count"),
+        pl.col("cve").unique().sort().alias("cves"),
+        pl.col("confidence").mean().alias("avg_confidence"),
+        pl.col("change_count").mean().alias("avg_change_count"),
+        pl.col("quality_score").mean().alias("avg_quality_score"),
+        pl.col("cvss").mean().alias("avg_cvss"),
+    ]).sort("cve_count", descending=True).head(TOP_HOTSPOTS_LIMIT)
 
-    Args:
-        df_with_quality: DataFrame with quality_score column
 
-    Returns:
-        Dictionary with top/bottom reports by various metrics
-    """
-    return {
-        "top_quality": df_with_quality.select(QUALITY_REPORT_COLUMNS)
-        .sort("quality_score", descending=True)
-        .head(TOP_REPORTS_LIMIT),
-        "bottom_quality": df_with_quality.select(QUALITY_REPORT_COLUMNS)
-        .sort("quality_score", descending=False)
-        .head(TOP_REPORTS_LIMIT),
-        "most_complex": df_with_quality.select(REPORT_COLUMNS)
-        .sort("change_count", descending=True)
-        .head(TOP_REPORTS_LIMIT),
-        "highest_confidence": df_with_quality.select(REPORT_COLUMNS)
-        .sort("confidence", descending=True)
-        .head(TOP_REPORTS_LIMIT),
+def _compute_cvss_severity_distribution(df: pl.DataFrame) -> pl.DataFrame:
+    """Compute CVSS severity distribution."""
+    cvss_df = _get_unique_cves_with_cvss(df)
+    
+    if len(cvss_df) == 0:
+        return pl.DataFrame({
+            "severity": ["Low", "Medium", "High", "Critical"],
+            "count": [0, 0, 0, 0],
+            "percentage": [0.0, 0.0, 0.0, 0.0]
+        })
+    
+    total = len(cvss_df)
+    return pl.DataFrame({
+        "severity": ["Low (0.0-3.9)", "Medium (4.0-6.9)", "High (7.0-8.9)", "Critical (9.0-10.0)"],
+        "count": [
+            ((cvss_df["cvss"] >= 0.0) & (cvss_df["cvss"] < 4.0)).sum(),
+            ((cvss_df["cvss"] >= 4.0) & (cvss_df["cvss"] < 7.0)).sum(),
+            ((cvss_df["cvss"] >= 7.0) & (cvss_df["cvss"] < 9.0)).sum(),
+            (cvss_df["cvss"] >= 9.0).sum(),
+        ],
+        "percentage": [
+            (((cvss_df["cvss"] >= 0.0) & (cvss_df["cvss"] < 4.0)).sum() / total * 100),
+            (((cvss_df["cvss"] >= 4.0) & (cvss_df["cvss"] < 7.0)).sum() / total * 100),
+            (((cvss_df["cvss"] >= 7.0) & (cvss_df["cvss"] < 9.0)).sum() / total * 100),
+            ((cvss_df["cvss"] >= 9.0).sum() / total * 100),
+        ]
+    })
+
+
+def _compute_top_reports(df: pl.DataFrame) -> Dict[str, pl.DataFrame]:
+    """Extract top/bottom quality reports and rankings."""
+    rankings = {
+        "top_quality": (QUALITY_REPORT_COLUMNS, "quality_score", True, None),
+        "bottom_quality": (QUALITY_REPORT_COLUMNS, "quality_score", False, None),
+        "most_complex": (REPORT_COLUMNS, "change_count", True, None),
+        "highest_confidence": (REPORT_COLUMNS, "confidence", True, None),
+        "highest_cvss": (REPORT_COLUMNS, "cvss", True, pl.col("cvss").is_not_null()),
+        "critical_severity": (REPORT_COLUMNS, "cvss", True, pl.col("cvss") >= 9.0),
     }
+    
+    results = {}
+    for name, (cols, sort_col, descending, filter_expr) in rankings.items():
+        data = df.filter(filter_expr) if filter_expr is not None else df
+        ranked = data.select(cols).sort([sort_col, "cve"], descending=[descending, False]).unique(
+            subset=["cve"], keep="first", maintain_order=True
+        )
+        results[name] = ranked #if name == "critical_severity" else ranked.head(TOP_REPORTS_LIMIT)
+    
+    return results
 
 
 # =============================================================================
@@ -387,64 +286,51 @@ def analyze_reports(
     """
     Analyze vulnerability reports and compute comprehensive statistics.
 
-    Quality scoring uses the formula: confidence * (baseline / (baseline + change_count))
-    where baseline = change_count_threshold (default 50). This ensures high confidence
-    and low change counts produce higher quality scores.
-
     Args:
-        df: DataFrame containing report metadata
-        confidence_threshold: Minimum confidence for filtering high-quality reports
-        change_count_threshold: Baseline for quality score calculation (not a filter)
-        quality_score_threshold: Minimum quality score for filtering high-quality reports
+        df: DataFrame with report metadata
+        confidence_threshold: Min confidence for high-quality filtering
+        change_count_threshold: Baseline for quality score calculation
+        quality_score_threshold: Min quality score for high-quality filtering
 
     Returns:
-        Dictionary containing analysis results with the following keys:
-            - Basic stats: total_reports, unique_cves, avg_confidence, etc.
-            - High quality: high_quality_reports_count, high_quality_by_folder
-            - By dimension: by_kb, by_model, by_folder
-            - Rankings: top_quality_reports, file_hotspots, etc.
+        Dictionary with analysis results
     """
-    thresholds = QualityThresholds(confidence_threshold, change_count_threshold, quality_score_threshold)
-
-    # Calculate quality scores
-    df_with_quality = _calculate_quality_score(df)
-
-    # Compute all analyses
-    analysis = {}
-
-    # Basic statistics
-    analysis.update(_compute_basic_stats(df))
+    df_with_quality = _calculate_quality_score(df, change_count_threshold)
+    
+    analysis = _compute_basic_stats(df)
     analysis["avg_quality_score"] = df_with_quality["quality_score"].mean()
-
-    # High-quality metrics
-    high_quality_df, hq_metrics = _compute_high_quality_metrics(df_with_quality, thresholds)
+    analysis.update(_compute_quality_distribution(df_with_quality))
+    analysis.update(_compute_correlations(df_with_quality))
+    analysis.update(_compute_efficiency_metrics(df_with_quality))
+    
+    hq_df, hq_metrics = _compute_high_quality_metrics(df_with_quality, confidence_threshold, quality_score_threshold)
     analysis.update(hq_metrics)
-
-    # Folder analysis
-    hq_by_folder, temporal = _compute_folder_analysis(df_with_quality, high_quality_df)
-    analysis["high_quality_by_folder"] = hq_by_folder
-    analysis["by_folder"] = temporal
-
-    # KB analysis
-    kb_stats, kb_quality = _compute_kb_analysis(df_with_quality, thresholds)
+    
+    analysis["high_quality_by_folder"] = _compute_folder_analysis(df_with_quality, hq_df)
+    analysis["by_folder"] = _compute_temporal_analysis(df_with_quality)
+    
+    kb_stats, kb_quality = _compute_group_stats(df_with_quality, "kb", confidence_threshold, change_count_threshold)
     analysis["by_kb"] = kb_stats
     analysis["kb_quality"] = kb_quality
-
-    # Model analysis
-    model_stats, model_quality = _compute_model_analysis(df_with_quality, thresholds)
+    
+    model_stats, model_quality = _compute_group_stats(df_with_quality, "model_name", confidence_threshold, change_count_threshold)
     analysis["by_model"] = model_stats
     analysis["model_quality"] = model_quality
-
-    # File hotspots (with quality scores)
+    
     analysis["file_hotspots"] = _compute_file_hotspots(df_with_quality)
-
-    # Top/bottom reports
+    analysis["file_kb_cve_concentration"] = _compute_file_kb_cve_concentration(df_with_quality)
+    analysis["cvss_severity_distribution"] = _compute_cvss_severity_distribution(df_with_quality)
+    
     top_reports = _compute_top_reports(df_with_quality)
-    analysis["top_quality_reports"] = top_reports["top_quality"]
-    analysis["bottom_quality_reports"] = top_reports["bottom_quality"]
-    analysis["most_complex_patches"] = top_reports["most_complex"]
-    analysis["highest_confidence_reports"] = top_reports["highest_confidence"]
-
+    analysis.update({
+        "top_quality_reports": top_reports["top_quality"],
+        "bottom_quality_reports": top_reports["bottom_quality"],
+        "most_complex_patches": top_reports["most_complex"],
+        "highest_confidence_reports": top_reports["highest_confidence"],
+        "highest_cvss_reports": top_reports["highest_cvss"],
+        "critical_severity_reports": top_reports["critical_severity"],
+    })
+    
     return analysis
 
 
@@ -455,29 +341,21 @@ def analyze_reports(
 
 def index_reports(reports_dir: str = "reports") -> pl.DataFrame:
     """
-    Index all txt files in the reports directory and extract metadata.
-
-    Reads the first line of each .txt file in the reports directory,
-    parses it as JSON, and creates a unified DataFrame with all metadata.
+    Index all txt files in reports directory and extract metadata.
 
     Args:
-        reports_dir: Path to the reports directory
+        reports_dir: Path to reports directory
 
     Returns:
-        DataFrame containing metadata from all report files with columns:
-            - Original metadata: cve, kb, confidence, change_count, etc.
-            - Added metadata: filepath, filename, folder
-            - Date converted to datetime format
+        DataFrame with report metadata
 
     Raises:
-        ValueError: If reports directory doesn't exist or no valid files found
+        ValueError: If directory doesn't exist or no valid files found
     """
     base_path = Path(reports_dir)
-
     if not base_path.exists():
         raise ValueError(f"Reports directory '{reports_dir}' does not exist")
 
-    # Collect metadata from all txt files
     metadata_list = []
     errors = []
     all_keys = set()
@@ -487,27 +365,21 @@ def index_reports(reports_dir: str = "reports") -> pl.DataFrame:
             with open(txt_file, "r", encoding="utf-8") as f:
                 first_line = f.readline().strip()
 
-            # Parse JSON (handle both formats)
             try:
                 metadata = json.loads(first_line)
             except json.JSONDecodeError:
                 import ast
-
                 metadata = ast.literal_eval(first_line)
 
             all_keys.update(metadata.keys())
-
-            # Add file path information
             metadata["filepath"] = str(txt_file)
             metadata["filename"] = txt_file.name
             metadata["folder"] = txt_file.parent.name
-
             metadata_list.append(metadata)
 
         except Exception as e:
             errors.append({"file": str(txt_file), "error": str(e)})
 
-    # Log errors
     if errors:
         print(f"Warning: Failed to parse {len(errors)} files:")
         for err in errors[:5]:
@@ -520,16 +392,13 @@ def index_reports(reports_dir: str = "reports") -> pl.DataFrame:
     if not metadata_list:
         raise ValueError("No valid report files found")
 
-    # Ensure all dictionaries have all keys
     for metadata in metadata_list:
         for key in all_keys:
             if key not in metadata:
                 metadata[key] = None
 
-    # Create DataFrame
     df = pl.DataFrame(metadata_list, infer_schema_length=None)
 
-    # Cast to proper types
     schema_overrides = {}
     if "date" in df.columns:
         schema_overrides["date"] = pl.Float64
@@ -541,7 +410,6 @@ def index_reports(reports_dir: str = "reports") -> pl.DataFrame:
     if schema_overrides:
         df = df.cast(schema_overrides)
 
-    # Convert date from Unix timestamp to datetime
     if "date" in df.columns:
         df = df.with_columns(pl.from_epoch(pl.col("date"), time_unit="s").alias("date"))
 
@@ -556,6 +424,24 @@ def index_reports(reports_dir: str = "reports") -> pl.DataFrame:
 # =============================================================================
 
 
+def _print_section(title: str, width: int = 100):
+    """Print section header."""
+    print(f"\n{'=' * width}")
+    print(f"{title:^{width}}")
+    print('=' * width)
+
+
+def _print_subsection(title: str, width: int = 100):
+    """Print subsection header."""
+    print(f"\n{title}")
+    print('-' * width)
+
+
+def _format_percentage(value: float, total: float) -> str:
+    """Format value as percentage of total."""
+    return f"{value}/{total} ({value/total*100:.1f}%)" if total > 0 else "N/A"
+
+
 def print_analysis_report(
     analysis: Dict,
     confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
@@ -566,99 +452,120 @@ def print_analysis_report(
     Print formatted analysis report.
 
     Args:
-        analysis: Analysis results dictionary from analyze_reports()
-        confidence_threshold: Confidence threshold used for filtering
-        change_count_threshold: Baseline used for quality score calculation
-        quality_score_threshold: Quality score threshold used for filtering
+        analysis: Analysis results from analyze_reports()
+        confidence_threshold: Confidence threshold used
+        change_count_threshold: Baseline for quality calculation
+        quality_score_threshold: Quality score threshold used
     """
-    print("\n" + "=" * 80)
-    print("VULNERABILITY REPORT ANALYSIS")
-    print("=" * 80)
-
-    # Overall Statistics
-    print("\nOVERALL STATISTICS")
-    print("-" * 80)
-    print(f"Total Reports: {analysis['total_reports']}")
-    print(f"Unique CVEs: {analysis['unique_cves']}")
-    print(f"Unique KBs: {analysis['unique_kbs']}")
-    print(f"Unique Files: {analysis['unique_files']}")
-
+    W = 100
+    
+    _print_section("VULNERABILITY REPORT ANALYSIS", W)
+    
+    # Executive Summary
+    _print_subsection("EXECUTIVE SUMMARY", W)
+    print(f"{'┌' + '─' * (W-2) + '┐'}")
+    print(f"│ {'Reports:':<30} {analysis['total_reports']:>10}   {'Unique CVEs:':<30} {analysis['unique_cves']:>10} │")
+    print(f"│ {'Unique KBs:':<30} {analysis['unique_kbs']:>10}   {'Unique Files:':<30} {analysis['unique_files']:>10} │")
+    print(f"│ {'High Quality CVEs:':<30} {analysis['high_quality_unique_cves']:>10}   {'Coverage:':<30} {_format_percentage(analysis['high_quality_unique_cves'], analysis['unique_cves']):>10} │")
+    if analysis.get('avg_cvss'):
+        print(f"│ {'Avg CVSS:':<30} {analysis['avg_cvss']:>10.2f}   {'Critical (≥9.0):':<30} {analysis['critical_cvss_count']:>10} │")
+    print(f"└{'─' * (W-2)}┘")
+    
     # Quality Metrics
-    print("\nQUALITY METRICS")
-    print("-" * 80)
-    print(f"Average Confidence: {analysis['avg_confidence']:.3f}")
-    print(f"Median Confidence: {analysis['median_confidence']:.3f}")
-    print(
-        f"Confidence Range: {analysis['min_confidence']:.3f} - {analysis['max_confidence']:.3f}"
-    )
-    print(f"\nAverage Change Count: {analysis['avg_change_count']:.1f}")
-    print(f"Median Change Count: {analysis['median_change_count']:.0f}")
-    print(
-        f"Change Count Range: {analysis['min_change_count']} - {analysis['max_change_count']}"
-    )
-    print(f"\nAverage Quality Score: {analysis['avg_quality_score']:.3f}")
-
+    _print_subsection("QUALITY METRICS", W)
+    print(f"Confidence:      Avg={analysis['avg_confidence']:.3f}  Med={analysis['median_confidence']:.3f}  "
+          f"Range=[{analysis['min_confidence']:.3f}, {analysis['max_confidence']:.3f}]")
+    print(f"Change Count:    Avg={analysis['avg_change_count']:.1f}  Med={analysis['median_change_count']:.0f}  "
+          f"Range=[{analysis['min_change_count']}, {analysis['max_change_count']}]")
+    print(f"Quality Score:   Avg={analysis['avg_quality_score']:.3f}  "
+          f"Q25={analysis['quality_q25']:.3f}  Q50={analysis['quality_q50']:.3f}  Q75={analysis['quality_q75']:.3f}")
+    
+    # Severity Analysis
+    if analysis.get('avg_cvss') is not None:
+        _print_subsection("SEVERITY ANALYSIS (CVSS)", W)
+        print(f"CVSS Statistics: Avg={analysis['avg_cvss']:.2f}  Med={analysis['median_cvss']:.2f}  "
+              f"Range=[{analysis['min_cvss']:.1f}, {analysis['max_cvss']:.1f}]")
+        print(f"Coverage:        {_format_percentage(analysis['cvss_available_count'], analysis['unique_cves'])} CVEs have CVSS data")
+        print(f"High Severity:   {analysis['high_cvss_count']} CVEs (≥7.0)")
+        print(f"Critical:        {analysis['critical_cvss_count']} CVEs (≥9.0)")
+        print("\nSeverity Distribution:")
+        print(analysis["cvss_severity_distribution"])
+    
+    # Insights & Correlations
+    _print_subsection("INSIGHTS & CORRELATIONS", W)
+    if analysis.get('cvss_confidence_corr') is not None:
+        print(f"Correlation with Confidence:")
+        print(f"  CVSS:             {analysis['cvss_confidence_corr']:>6.3f}")
+        print(f"  Change Count:     {analysis['change_count_confidence_corr']:>6.3f}")
+        print(f"  Quality Score:    {analysis['quality_score_confidence_corr']:>6.3f}")
+    elif analysis.get('change_count_confidence_corr') is not None:
+        print(f"Correlation with Confidence:")
+        if analysis.get('cvss_confidence_corr') is not None:
+            print(f"  CVSS:             {analysis['cvss_confidence_corr']:>6.3f}")
+        print(f"  Change Count:     {analysis['change_count_confidence_corr']:>6.3f}")
+        print(f"  Quality Score:    {analysis['quality_score_confidence_corr']:>6.3f}")
+    
+    print(f"\nPatch Efficiency:")
+    print(f"  CVEs per File:           {analysis['cves_per_file']:.2f}")
+    print(f"  Files per CVE (avg):     {analysis['files_per_cve_avg']:.2f}")
+    print(f"  Files per CVE (median):  {analysis['files_per_cve_median']:.0f}")
+    print(f"  Files per CVE (max):     {analysis['files_per_cve_max']:.0f}")
+    
     # High Quality Reports
-    print(
-        f"\nHIGH QUALITY REPORTS (confidence > {confidence_threshold} AND quality_score > {quality_score_threshold})"
-    )
-    print("-" * 80)
-    print(f"Quality Score Baseline (for scoring): {change_count_threshold}")
+    _print_subsection(f"HIGH QUALITY REPORTS (confidence>{confidence_threshold} AND quality_score>{quality_score_threshold})", W)
     print(f"Total High Quality Reports: {analysis['high_quality_reports_count']}")
-    print(f"Unique High Quality CVEs: {analysis['high_quality_unique_cves']}")
-    print("\nHigh Confidence CVEs by Folder:")
+    print(f"Unique High Quality CVEs:   {analysis['high_quality_unique_cves']}")
+    print(f"\nHigh Quality CVEs by Folder:")
     print(analysis["high_quality_by_folder"])
-
-    # Statistics by KB
-    print("\nSTATISTICS BY KB")
-    print("-" * 80)
-    print(analysis["by_kb"])
-
-    # Statistics by Model
-    if len(analysis["by_model"]) > 0:
-        print("\nSTATISTICS BY MODEL")
-        print("-" * 80)
-        print(analysis["by_model"])
-
-    # Temporal Analysis
-    print("\nTEMPORAL ANALYSIS (by Folder)")
-    print("-" * 80)
+    
+    # Dimensional Analysis
+    _print_subsection("DIMENSIONAL ANALYSIS", W)
+    print("\nBy Folder (Temporal):")
     print(analysis["by_folder"])
-
-    # Top Quality Reports
-    print("\nTOP 10 HIGHEST QUALITY REPORTS")
-    print("-" * 80)
+    
+    print("\nBy KB:")
+    print(analysis["by_kb"])
+    
+    if len(analysis["by_model"]) > 0:
+        print("\nBy Model:")
+        print(analysis["by_model"])
+    
+    # Rankings
+    _print_subsection("TOP QUALITY REPORTS", W)
+    print(f"Top {TOP_REPORTS_LIMIT} Highest Quality CVEs:")
     print(analysis["top_quality_reports"])
-
-    # Most Complex Patches
-    print("\nTOP 10 MOST COMPLEX PATCHES")
-    print("-" * 80)
+    
+    if len(analysis["highest_cvss_reports"]) > 0:
+        print(f"\nTop {TOP_REPORTS_LIMIT} Highest CVSS CVEs:")
+        print(analysis["highest_cvss_reports"])
+    
+    if len(analysis["critical_severity_reports"]) > 0:
+        print(f"\nCritical Severity CVEs (CVSS ≥ 9.0) - Total: {len(analysis['critical_severity_reports'])}")
+        print(analysis["critical_severity_reports"])
+    
+    print(f"\nTop {TOP_REPORTS_LIMIT} Most Complex CVEs:")
     print(analysis["most_complex_patches"])
-
-    # Highest Confidence
-    print("\nTOP 10 HIGHEST CONFIDENCE REPORTS")
-    print("-" * 80)
+    
+    print(f"\nTop {TOP_REPORTS_LIMIT} Highest Confidence CVEs:")
     print(analysis["highest_confidence_reports"])
-
-    # Bottom Quality
-    print("\nBOTTOM 10 LOWEST QUALITY REPORTS")
-    print("-" * 80)
+    
+    print(f"\nBottom {TOP_REPORTS_LIMIT} Lowest Quality CVEs:")
     print(analysis["bottom_quality_reports"])
-
-    # File Hotspots
-    print("\nTOP 20 FILE HOTSPOTS (Most Frequently Patched)")
-    print("-" * 80)
+    
+    _print_subsection("FILE HOTSPOTS", W)
+    print("Top 20 Most Frequently Patched Files:")
     print(analysis["file_hotspots"])
-
-    # Model Quality Comparison
-    if analysis["model_quality"] is not None:
-        print("\nMODEL QUALITY COMPARISON")
-        print("-" * 80)
+    
+    print("\nTop 20 Files with Most CVEs per KB (Single Update Concentration):")
+    print(analysis["file_kb_cve_concentration"])
+    
+    # Detailed Quality Assessments
+    _print_subsection("QUALITY ASSESSMENTS", W)
+    if analysis["model_quality"] is not None and len(analysis["model_quality"]) > 0:
+        print("Model Quality Comparison:")
         print(analysis["model_quality"])
-
-    # KB Quality Assessment
-    print("\nKB QUALITY ASSESSMENT")
-    print("-" * 80)
+    
+    print("\nKB Quality Assessment:")
     print(analysis["kb_quality"])
 
 
@@ -667,14 +574,10 @@ def print_analysis_report(
 # =============================================================================
 
 if __name__ == "__main__":
-    # Index all reports
     df = index_reports()
     print(f"\nDataFrame shape: {df.shape}")
     print(f"\nFirst few rows:")
     print(df.head())
 
-    # Run analysis
     analysis = analyze_reports(df)
-
-    # Print results
     print_analysis_report(analysis)

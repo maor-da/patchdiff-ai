@@ -155,7 +155,10 @@ class Supervisor(Agent):
         # memory = MemorySaver()
         self._graph = builder.compile()
 
-    def check_report_cache(self, context: SupervisorContext):
+    def check_report_cache(self, context: SupervisorContext, config: RunnableConfig):
+        if config.get("configurable", {}).get("evaluate", False):
+            return self.NODES.gather_info
+        
         console.info("[*] Check for cached reports")
         docs = VectorStore.reports.get(
             where={"cve": context.cve_details.cve},
@@ -177,6 +180,7 @@ class Supervisor(Agent):
                         )
                     ),
                     confidence=metadata.get("confidence"),
+                    model=metadata.get("model_name"),
                 )
             )
 
