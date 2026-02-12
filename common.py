@@ -741,3 +741,16 @@ except ClientAuthenticationError as e:
     console.error(f"Currently we are using azure.text-embedding-3-small as the embedded model."
                   f"Use other embedded model instead, and remove this validation.")
     exit(1)
+
+# Evaluation models for VR agent
+eval_models = [
+                LLM.claude_sonnet,
+                LLM.claude_haiku_4_5,
+                LLM.o3,
+                LLM.gemini_3_pro,
+                LLM.gemini_3_flash,
+                LLM.gemini_2_5_pro,
+                LLM.gemini_2_5_flash,
+                LLM.gpt_4o,
+            ]
+

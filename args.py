@@ -160,7 +160,7 @@ def get_cve_list(argv: list[str]) -> list[str]:
         if args.cve:
             print_report(args.cve, to_file=True)
         elif args.month:
-            cve, name, ids = get_month_cve(args)
+            cve, name, ids, _ = get_month_cve(args)
             for c in cve:
                 os_name = "".join(x.replace(" ", "_") for x in (name or []))
                 os_id = "".join(str(x) for x in (ids or []))
@@ -170,11 +170,11 @@ def get_cve_list(argv: list[str]) -> list[str]:
                     monthly_path=f"{args.month}.{os_name}.{os_id}".lower(),
                 )
 
-        return []
+        return [], args
 
     if args.mode == "cve":
         cve = [args.cve_id]
-    else:
+    elif args.mode == "month":
         cve, *_ = get_month_cve(args)
 
         if (
@@ -184,6 +184,6 @@ def get_cve_list(argv: list[str]) -> list[str]:
             .lower()
             .startswith("y")
         ):
-            return []
+            return [], args
 
     return cve, args

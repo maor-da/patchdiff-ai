@@ -101,7 +101,7 @@ async def evaluate(save = False):
 
     with Timer("Patch Wednesday Assistant"):
         config = {
-            "interrupt": False if len(cve_list) > 1 else True,
+            "interrupt": False,
             "threshold": Threshold(
                 candidates=7.5, security_modification=0.25, report=0.1
             ),
@@ -118,6 +118,6 @@ async def evaluate(save = False):
 if __name__ == "__main__":
     try:
         asyncio.run(patch_wedensday_assistant(sys.argv[1:]), debug=dbg)
-        # asyncio.run(evaluate(True), debug=dbg)
+        # asyncio.run(evaluate(False), debug=dbg)
     except (EOFError, KeyboardInterrupt):
         pass

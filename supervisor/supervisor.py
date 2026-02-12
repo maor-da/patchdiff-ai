@@ -26,6 +26,7 @@ from common import (
     LLM,
     save_to_file,
     safe_serialize,
+    eval_models
 )
 from defaultdataclass import defaultdataclass, field
 
@@ -157,6 +158,27 @@ class Supervisor(Agent):
 
     def check_report_cache(self, context: SupervisorContext, config: RunnableConfig):
         if config.get("configurable", {}).get("evaluate", False):
+            cached_docs = VectorStore.reports.get(
+                where={
+                    "$and": [
+                        {"cve": context.cve_details.cve},
+                        {"model_name": {"$in": [model.name for model in eval_models]}},
+                    ]
+                },
+            )
+
+            # Extract unique model names from cached reports
+            unique_models = set()
+            for metadata in cached_docs.get("metadatas", []):
+                if metadata.get("model_name"):
+                    unique_models.add(metadata["model_name"])
+            
+            if len(unique_models) >= 4:
+                console.info(
+                    f"[*] Found cached reports for {context.cve_details.cve} from {len(unique_models)} different models, skip eval."
+                )
+                return self.NODES.assistant
+            
             return self.NODES.gather_info
         
         console.info("[*] Check for cached reports")

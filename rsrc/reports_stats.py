@@ -21,6 +21,11 @@ DEFAULT_QUALITY_SCORE_THRESHOLD = 0.4
 TOP_REPORTS_LIMIT = 20
 TOP_HOTSPOTS_LIMIT = 20
 
+# Models to exclude from analysis
+EXCLUDED_MODELS = [
+    "azure.o3",
+]
+
 REPORT_COLUMNS = ["cve", "file", "kb", "cvss", "confidence", "change_count", "folder", "model_name"]
 QUALITY_REPORT_COLUMNS = REPORT_COLUMNS + ["quality_score"]
 
@@ -371,6 +376,10 @@ def index_reports(reports_dir: str = "reports") -> pl.DataFrame:
                 import ast
                 metadata = ast.literal_eval(first_line)
 
+            # Skip reports from excluded models
+            if metadata.get("model_name") in EXCLUDED_MODELS:
+                continue
+
             all_keys.update(metadata.keys())
             metadata["filepath"] = str(txt_file)
             metadata["filename"] = txt_file.name
@@ -388,6 +397,9 @@ def index_reports(reports_dir: str = "reports") -> pl.DataFrame:
             print(f"  ... and {len(errors) - 5} more")
 
     print(f"Found metadata keys: {sorted(all_keys)}")
+    
+    if EXCLUDED_MODELS:
+        print(f"Excluded models from indexing: {', '.join(EXCLUDED_MODELS)}")
 
     if not metadata_list:
         raise ValueError("No valid report files found")
