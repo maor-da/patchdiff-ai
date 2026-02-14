@@ -12,7 +12,11 @@ def recursive_patch(base, patch):
     try:
         while pt.is_patch(patch):
             try:
-                patch = pt.apply(memoryview(base), memoryview(patch))
+                result = pt.apply(memoryview(base), memoryview(patch))
+                # If result is None and base is provided, try self-contained
+                if not result and base:
+                    result = pt.apply(None, memoryview(patch))
+                patch = result
             except RuntimeError:
                 patch = pt.apply(None, memoryview(patch))
     except RuntimeError:

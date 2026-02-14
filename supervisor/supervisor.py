@@ -438,7 +438,7 @@ class Supervisor(Agent):
                 if targets:
                     return targets
 
-        return END
+        return self.NODES.assistant
 
     def assistant(self, context: SupervisorContext, config: RunnableConfig):
         context.state_info.node.append(self.NODES.assistant)
