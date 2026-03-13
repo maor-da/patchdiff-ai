@@ -100,7 +100,7 @@ def is_int(value: str | int):
     return False
 
 
-def get_cvrf_data(cvrf_id="2025-Apr"):
+def get_cvrf_data(cvrf_id="2026-Jan"):
     url = f"https://api.msrc.microsoft.com/cvrf/v3.0/cvrf/{cvrf_id}"
     headers = {"Accept": "application/json"}
     data = requests.get(url, headers=headers, timeout=30).json()

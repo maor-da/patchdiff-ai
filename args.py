@@ -80,6 +80,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable evaluation mode.",
     )
+    cve_p.add_argument(
+        "--platform-ids",
+        dest="platform_ids",
+        metavar="ID1,ID2",
+        type=lambda s: {x.strip() for x in str(s).split(",") if x.strip()},
+        help="Comma-separated list of platform IDs.",
+        default=set(),
+    )
 
     # month MODE
     month_p = sub.add_parser("month", help="Generate Patch Tuesday batch report.")

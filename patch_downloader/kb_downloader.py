@@ -15,12 +15,18 @@ UID_PAT = re.compile(r"goToDetails\(['\"]([0-9a-f\-]{36})['\"]\)")
 def find_uid(session: HTMLSession, kb: str, product: str) -> str:
     resp = session.get(SEARCH_URL.format(kb), timeout=30)
     target = 'microsoft server operating system' if 'server' in product.lower() else product.lower()
+    target_tokens = set(re.findall(r"[a-z0-9]+", target))
+    best_score, best_uid = -1, None
     for a in resp.html.find("a[onclick^='goToDetails']"):
-        if target in a.text.lower():
-            m = UID_PAT.search(a.attrs.get("onclick", ""))
-            if m:
-                return m.group(1)
-    raise RuntimeError("[x] UID not found")
+        m = UID_PAT.search(a.attrs.get("onclick", ""))
+        if m:
+            tokens = set(re.findall(r"[a-z0-9]+", a.text.lower()))
+            s = len(target_tokens & tokens)
+            if s > best_score:
+                best_score, best_uid = s, m.group(1)
+    if best_uid is None:
+        raise RuntimeError("[x] UID not found")
+    return best_uid
 
 
 def find_msu(session: HTMLSession, uid: str, kb: str) -> str:

@@ -212,7 +212,7 @@ class Supervisor(Agent):
 
         return self.NODES.gather_info
 
-    def get_cve_info(self, context: SupervisorContext):
+    def get_cve_info(self, context: SupervisorContext, config: RunnableConfig):
         context.state_info.node.append(self.NODES.cve_info)
 
         console.debug("[*] Getting CVRF OS name and ID of this machine")
@@ -309,6 +309,8 @@ class Supervisor(Agent):
                     match action:
                         case "reanalyze":
                             return self.NODES.gather_info
+                        case "exit":
+                            return END
 
             case self.vr_agent.NODES.generate:
                 if context.reports:
@@ -454,7 +456,7 @@ class Supervisor(Agent):
                     continue
 
                 if user_input == "exit":
-                    break
+                    return {"action": "exit"}
 
                 match user_input:
                     case "help":
