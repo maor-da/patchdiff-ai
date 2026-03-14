@@ -2,6 +2,7 @@ import ctypes
 import winreg
 from ctypes.wintypes import DWORD, WORD, BYTE, WCHAR
 import sys
+from datetime import datetime
 from common import logger, console
 import requests
 
@@ -100,7 +101,9 @@ def is_int(value: str | int):
     return False
 
 
-def get_cvrf_data(cvrf_id="2026-Jan"):
+def get_cvrf_data(cvrf_id=None):
+    if cvrf_id is None:
+        cvrf_id = datetime.now().strftime("%Y-%b").upper()
     url = f"https://api.msrc.microsoft.com/cvrf/v3.0/cvrf/{cvrf_id}"
     headers = {"Accept": "application/json"}
     data = requests.get(url, headers=headers, timeout=30).json()

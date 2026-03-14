@@ -216,7 +216,7 @@ class Supervisor(Agent):
         context.state_info.node.append(self.NODES.cve_info)
 
         console.debug("[*] Getting CVRF OS name and ID of this machine")
-        platform = config.get("platform")
+        platform = config.get("configurable", {}).get("platform")
         if platform:
             context.os.name, context.os.id = platform
         else:
