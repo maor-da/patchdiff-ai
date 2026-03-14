@@ -216,7 +216,11 @@ class Supervisor(Agent):
         context.state_info.node.append(self.NODES.cve_info)
 
         console.debug("[*] Getting CVRF OS name and ID of this machine")
-        context.os.name, context.os.id = get_os_cvrf_data()
+        platform = config.get("platform")
+        if platform:
+            context.os.name, context.os.id = platform
+        else:
+            context.os.name, context.os.id = get_os_cvrf_data()
         context.os.arch = get_os_data.processor_arch_tokens(
             {
                 0: ("x86",),

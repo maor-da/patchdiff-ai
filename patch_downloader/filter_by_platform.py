@@ -93,6 +93,21 @@ def pick_ids(
     return ids, chosen_names
 
 
+def get_platforms_by_ids(ids: set[str]) -> set[tuple[str, str]]:
+    """Return a set of (platform_name, platform_id) pairs for the given product IDs.
+
+    Looks up names from the latest CVRF product tree.  Falls back to the raw ID
+    string when a name cannot be resolved.
+    """
+    from patch_downloader import get_os_data
+
+    data = get_os_data.get_cvrf_data()
+    name_by_id = {
+        str(k): v for k, v in get_os_data.load_product_tree(data).items()
+    }
+    return {(name_by_id.get(i, i), i) for i in ids}
+
+
 def collect_cves(cvrf: dict, wanted: set[str]) -> list[dict]:
     rows = []
     for v in cvrf["Vulnerability"]:

@@ -6,6 +6,7 @@ from agent_tools.vector_store import VectorStore
 from common import console, save_to_file
 from patch_downloader.filter_by_platform import (
     get_pt_cve_list_by_platform,
+    get_platforms_by_ids,
     print_cve_list,
 )
 
@@ -161,7 +162,7 @@ def get_month_cve(args):
     return cve, name, ids, df
 
 
-def get_cve_list(argv: list[str]) -> list[str]:
+def get_cve_list(argv: list[str]) -> tuple[list[str], object, set[tuple[str, str]]]:
     args = build_parser().parse_args(argv)
 
     if args.mode == "get_cached_report":
@@ -178,12 +179,15 @@ def get_cve_list(argv: list[str]) -> list[str]:
                     monthly_path=f"{args.month}.{os_name}.{os_id}".lower(),
                 )
 
-        return [], args
+        return [], args, set()
 
     if args.mode == "cve":
         cve = [args.cve_id]
+        platform_ids = getattr(args, "platform_ids", set())
+        platforms = get_platforms_by_ids(platform_ids) if platform_ids else set()
     elif args.mode == "month":
-        cve, *_ = get_month_cve(args)
+        cve, name, ids, _ = get_month_cve(args)
+        platforms = set(zip(name, ids)) if (name and ids) else set()
 
         if (
             not input(
@@ -192,6 +196,6 @@ def get_cve_list(argv: list[str]) -> list[str]:
             .lower()
             .startswith("y")
         ):
-            return [], args
+            return [], args, set()
 
-    return cve, args
+    return cve, args, platforms

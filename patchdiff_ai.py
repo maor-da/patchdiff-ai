@@ -23,20 +23,33 @@ async def run(cve: str, config: dict = None):
 
 
 async def patch_wedensday_assistant(argv: list[str]):
-    cve_list, args = get_cve_list(argv)
+    cve_list, args, platforms = get_cve_list(argv)
     if cve_list is None or len(cve_list) == 0:
         return
 
+    # Build (cve, platform_or_None) pairs
+    if platforms:
+        tasks_input = [(c, p) for c in cve_list for p in platforms]
+    else:
+        tasks_input = [(c, None) for c in cve_list]
+
     with Timer("Patch Wednesday Assistant"):
-        config = {
-            "interrupt": False if len(cve_list) > 1 else True,
+        base_config = {
+            "interrupt": False if len(tasks_input) > 1 else True,
             "threshold": Threshold(
                 candidates=7.5, security_modification=0.25, report=0.1
             ),
-            'evaluate': args.eval
+            'evaluate': args.eval,
         }
-        console.info(f"[*] Start the system with config: {config}")
-        tasks = [await asyncio.to_thread(run, cve=c, config=config) for c in cve_list]
+        console.info(f"[*] Start the system with config: {base_config}")
+        tasks = [
+            await asyncio.to_thread(
+                run,
+                cve=c,
+                config={**base_config, **({"platform": p} if p else {})},
+            )
+            for c, p in tasks_input
+        ]
         results = await asyncio.gather(*tasks, return_exceptions=(not dbg))
         logger.debug(f"Results: {results}")
 
