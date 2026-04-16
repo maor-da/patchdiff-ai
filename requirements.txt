@@ -23,3 +23,4 @@ python-binexport==0.3.7
 posthog==4.0.1
 langchain-anthropic
 langchain-google-genai
+ida-pro-mcp>=1.0.0

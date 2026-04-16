@@ -34,6 +34,12 @@ from langgraph.graph import StateGraph, add_messages
 
 from patch_analysis.patch_delta import patch_entry
 from patch_downloader import get_os_data
+from mcp_agent import (
+    McpResult,
+    McpReversing,
+    McpReversingContext,
+    McpReversingOutput,
+)
 from re_agent.revearse_engineer_agent import (
     ReverseEngineering,
     ReverseEngineeringOutput,
@@ -54,6 +60,7 @@ class SupervisorContext(
     GatherInfoContextOutput,
     WindowsInternalsOutput,
     ReverseEngineeringOutput,
+    McpReversingOutput,
     VulnerabilityResearchOutput,
 ):
     cve_details: Annotated[CveDetails, lambda _, new: new] = field(
@@ -64,6 +71,7 @@ class SupervisorContext(
         default_factory=StateInfo
     )
     artifacts: Annotated[list[Artifact], operator.add] = field(default_factory=list)
+    mcp_results: Annotated[list[McpResult], operator.add] = field(default_factory=list)
     reports: Annotated[list[Report], operator.add] = field(default_factory=list)
     action: str = ""
 
@@ -75,6 +83,7 @@ class Supervisor(Agent):
         gather_info = "Gather Information"
         wi_agent = "Windows Internals Agent"
         re_agent = "Reverse Engineering Agent"
+        mcp_agent = "MCP Reversing Agent"
         vr_agent = "Vulnerability Research Agent"
         assistant = "Assistant"
         # patch = "Patch candidates"
@@ -83,6 +92,7 @@ class Supervisor(Agent):
         self.gather_info = GatherInfo()
         self.wi_agent = WindowsInternals()
         self.re_agent = ReverseEngineering()
+        self.mcp_agent = McpReversing()
         self.vr_agent = VulnerabilityResearch()
         self.llm = AgentModels.default_model.model
         super().__init__(draw=True)
@@ -118,6 +128,7 @@ class Supervisor(Agent):
         builder.add_node(self.NODES.gather_info, self.gather_info.get_graph())
         builder.add_node(self.NODES.wi_agent, self.wi_agent.get_graph())
         builder.add_node(self.NODES.re_agent, self.re_agent.get_graph())
+        builder.add_node(self.NODES.mcp_agent, self.mcp_agent.get_graph())
         builder.add_node(self.NODES.vr_agent, self.vr_agent.get_graph())
 
         builder.set_entry_point(self.NODES.cve_info)
@@ -136,6 +147,7 @@ class Supervisor(Agent):
                 self.NODES.gather_info,
                 self.NODES.wi_agent,
                 self.NODES.re_agent,
+                self.NODES.mcp_agent,
                 self.NODES.vr_agent,
                 # self.NODES.patch,
                 END,
@@ -149,6 +161,7 @@ class Supervisor(Agent):
         #                               ])
         builder.add_edge(self.NODES.wi_agent, self.NODES.assistant)
         builder.add_edge(self.NODES.re_agent, self.NODES.assistant)
+        builder.add_edge(self.NODES.mcp_agent, self.NODES.assistant)
         builder.add_edge(self.NODES.vr_agent, self.NODES.assistant)
 
         builder.set_finish_point(self.NODES.assistant)
@@ -427,16 +440,35 @@ class Supervisor(Agent):
                     pass  # refine windows internals
 
             case self.re_agent.NODES.decompile:
-                # From RE agent
+                # From RE agent: hand each artifact to the idalib-mcp investigator
                 targets = []
                 for artifact in context.artifacts:
+                    targets.append(
+                        Send(
+                            self.NODES.mcp_agent,
+                            McpReversingContext(
+                                state_info=context.state_info,
+                                artifact=artifact,
+                                cve_details=context.cve_details,
+                            ),
+                        )
+                    )
+
+                if targets:
+                    return targets
+
+            case self.mcp_agent.NODES.investigate:
+                # From MCP agent: forward decompiled findings into VR
+                targets = []
+                for result in context.mcp_results:
                     targets.append(
                         Send(
                             self.NODES.vr_agent,
                             VulnerabilityResearchContext(
                                 state_info=context.state_info,
-                                artifact=artifact,
+                                artifact=result.artifact,
                                 cve_details=context.cve_details,
+                                decompiled=result.decompiled,
                             ),
                         )
                     )

@@ -14,7 +14,8 @@
    * [4.1 Python 3.11](#41-python-311)
    * [4.2 IDA Pro 8.x](#42-ida-pro-8x)
    * [4.3 BinExport + BinDiff 8](#43-binexport--bindiff-8)
-   * [4.4 Project dependencies](#44-project-dependencies)
+   * [4.4 IDA Pro MCP (headless idalib)](#44-ida-pro-mcp-headless-idalib)
+   * [4.5 Project dependencies](#45-project-dependencies)
 5. [Quick Start](#quick-start)
 6. [Sample Output](#sample-output)
 7. [Extending the Graph](#extending-the-graph)
@@ -98,7 +99,35 @@ python --version  # should print 3.11.x
      * `binexport12_ida*.dll`
 3. Restart IDA once to verify `Edit → Plugins → BinExport` is present.
 
-### 4.4 Project dependencies
+### 4.4 IDA Pro MCP (headless idalib)
+
+The Reverse-Engineering flow no longer decompiles every BinDiff-flagged function up-front. Instead, after BinDiff finishes, the supervisor spawns **two headless `idalib-mcp` servers** (one per binary) and hands the worklist to an agent that pulls pseudocode on demand over SSE.
+
+1. Install **idalib** following the Hex-Rays documentation for your IDA Pro installation (idalib is bundled with IDA 9.0+; for 8.x consult Hex-Rays for the compatibility layer).
+2. Install the CLI that hosts idalib over MCP:
+
+   ```powershell
+   > pip install ida-pro-mcp
+   ```
+
+   This lands the `idalib-mcp` binary on `PATH`. Verify:
+
+   ```powershell
+   > idalib-mcp --help
+   ```
+
+3. Environment knobs:
+
+   | Var                   | Default        | Purpose                                          |
+   |-----------------------|----------------|--------------------------------------------------|
+   | `IDALIB_MCP_BIN`      | `idalib-mcp`   | Override the launcher binary (absolute path ok). |
+   | `IDA_MCP_PORT_BASE`   | `8745`         | Primary server port; secondary uses `+1`.        |
+   | `IDA_MCP_BOOT_TIMEOUT`| `60` (seconds) | How long to wait for each port to open.          |
+
+> [!NOTE]
+> The launcher always passes `--isolated-contexts`, so the two idalib sessions can run side-by-side safely. If `idalib-mcp` is missing from `PATH`, or a port fails to open within the boot timeout, the run aborts — there is no batch-decompile fallback.
+
+### 4.5 Project dependencies
 
 ```powershell
 # clone
@@ -109,7 +138,7 @@ python --version  # should print 3.11.x
 > python -m venv .venv
 > .venv\Scripts\activate
 
-# compile deps (langgraph, python-bindiff, etc.)
+# compile deps (langgraph, python-bindiff, ida-pro-mcp, etc.)
 > pip install -r requirements.txt
 ```
 

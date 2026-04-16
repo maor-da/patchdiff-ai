@@ -11,7 +11,6 @@ from common import StateInfo, Timer, PatchStoreEntry, logger, Artifact, console
 from defaultdataclass import defaultdataclass
 
 from patch_analysis import ida_analysis
-from patch_analysis.bindiff_analysis import analyze_diff
 
 from bindiff import BinDiff
 
@@ -34,9 +33,9 @@ class ReverseEngineering(Agent):
     Agent that can access specific files in the patch_store and analyze them through:
     1. Disassemble and reverse engineering using IDA pro
     2. Export metadata using binexport plugin
-    3. Decompile requested function using RVA
-    4. Bindiff two binexport files and generate diff file
-    5. Using IDAlib as MCP for further analysis (* Future)
+    3. Bindiff two binexport files and generate diff file
+    4. Emit a sorted worklist of changed functions as an Artifact; on-demand
+       decompilation happens downstream via the idalib-mcp agent.
     '''
 
     @dataclass(frozen=True)
@@ -94,7 +93,7 @@ class ReverseEngineering(Agent):
             except sqlite3.DatabaseError:
                 logger.warning(f'BinDiff database corrupted for {context.primary_file.name}, regenerating...')
                 diff = await asyncio.to_thread(BinDiff.from_binexport_files, curr_binexport, prev_binexport, bindiff_path, override=True)
-            
+
             if not diff:
                 logger.warning(f'Faild to bindiff {context.primary_file.name}')
 
@@ -104,14 +103,19 @@ class ReverseEngineering(Agent):
         context.state_info.node.append(self.NODES.decompile)
 
         if not context.diff:
-            logger.warning("No diff available to add to vector store")
+            logger.warning("No diff available to emit artifact")
             return {"artifacts": []}
 
-        with Timer('analyze diff and decompile'):
-            changed = await analyze_diff(context.diff)
-            console.info(f'[+] {len(changed)} functions modified in {context.primary_file.name}')
+        changed = sorted(
+            (v for v in context.diff.primary_functions_match.values()
+             if v.similarity < 1.0),
+            key=lambda x: (x.similarity, -x.confidence),
+        )
+        console.info(
+            f'[+] {len(changed)} functions modified in {context.primary_file.name}'
+        )
 
-            return {"artifacts": [Artifact(primary_file=context.primary_file,
-                                           secondary_file=context.secondary_file,
-                                           diff=context.diff,
-                                           changed=changed)]}
+        return {"artifacts": [Artifact(primary_file=context.primary_file,
+                                       secondary_file=context.secondary_file,
+                                       diff=context.diff,
+                                       changed=changed)]}
