@@ -663,23 +663,35 @@ def init_azure_models(azure_credential):
 def init_anthropic_models():
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return
+    
+    base = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
 
     LLM.claude_sonnet = Model(
-        name="claude.sonnet", # $3 per 1M
+        name="claude.sonnet-4.6", # $3 per 1M
         model=ChatAnthropic(
-            model="claude-sonnet-4-5",
+            model="claude-sonnet-4-6",
+            base_url=base,
         ),
     )
     LLM.claude_haiku_4_5 = Model(
         name="claude.haiku-4.5", # $1 per 1M
         model=ChatAnthropic(
             model="claude-haiku-4-5-20251001",
+            base_url=base,
         ),
     )
     LLM.claude_opus = Model(
-        name="claude.opus", # 5$ per 1M
+        name="claude.opus-4.6", # 5$ per 1M
         model=ChatAnthropic(
-            model="claude-opus-4-5",
+            model="claude-opus-4-6",
+            base_url=base,
+        ),
+    )
+    LLM.claude_opus = Model(
+        name="claude.opus-4.7", # 5$ per 1M
+        model=ChatAnthropic(
+            model="claude-opus-4-7",
+            base_url=base,
         ),
     )
 
