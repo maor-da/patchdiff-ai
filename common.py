@@ -670,28 +670,28 @@ def init_anthropic_models():
         name="claude.sonnet-4.6", # $3 per 1M
         model=ChatAnthropic(
             model="claude-sonnet-4-6",
-            base_url=base,
+            anthropic_api_url=base,
         ),
     )
     LLM.claude_haiku_4_5 = Model(
         name="claude.haiku-4.5", # $1 per 1M
         model=ChatAnthropic(
             model="claude-haiku-4-5-20251001",
-            base_url=base,
+            anthropic_api_url=base,
         ),
     )
     LLM.claude_opus = Model(
         name="claude.opus-4.6", # 5$ per 1M
         model=ChatAnthropic(
             model="claude-opus-4-6",
-            base_url=base,
+            anthropic_api_url=base,
         ),
     )
     LLM.claude_opus = Model(
         name="claude.opus-4.7", # 5$ per 1M
         model=ChatAnthropic(
             model="claude-opus-4-7",
-            base_url=base,
+            anthropic_api_url=base,
         ),
     )
 
