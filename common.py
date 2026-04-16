@@ -663,23 +663,35 @@ def init_azure_models(azure_credential):
 def init_anthropic_models():
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return
+    
+    base = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
 
     LLM.claude_sonnet = Model(
-        name="claude.sonnet", # $3 per 1M
+        name="claude.sonnet-4.6", # $3 per 1M
         model=ChatAnthropic(
-            model="claude-sonnet-4-5",
+            model="claude-sonnet-4-6",
+            anthropic_api_url=base,
         ),
     )
     LLM.claude_haiku_4_5 = Model(
         name="claude.haiku-4.5", # $1 per 1M
         model=ChatAnthropic(
             model="claude-haiku-4-5-20251001",
+            anthropic_api_url=base,
         ),
     )
     LLM.claude_opus = Model(
-        name="claude.opus", # 5$ per 1M
+        name="claude.opus-4.6", # 5$ per 1M
         model=ChatAnthropic(
-            model="claude-opus-4-5",
+            model="claude-opus-4-6",
+            anthropic_api_url=base,
+        ),
+    )
+    LLM.claude_opus_4_7 = Model(
+        name="claude.opus-4.7", # 5$ per 1M
+        model=ChatAnthropic(
+            model="claude-opus-4-7",
+            anthropic_api_url=base,
         ),
     )
 
@@ -732,7 +744,7 @@ try:
 
     init_azure_models(azure_credential)
     init_anthropic_models()
-    init_gemini_models()
+    # init_gemini_models()
 
     init_agents_models()
 
@@ -746,11 +758,8 @@ except ClientAuthenticationError as e:
 eval_models = [
                 LLM.claude_sonnet,
                 LLM.claude_haiku_4_5,
-                LLM.o3,
-                LLM.gemini_3_pro,
-                LLM.gemini_3_flash,
-                LLM.gemini_2_5_pro,
-                LLM.gemini_2_5_flash,
-                LLM.gpt_4o,
+                LLM.claude_opus_4_7,
+                LLM.claude_opus,
+                LLM.gpt_5_2,
             ]
 
