@@ -687,7 +687,7 @@ def init_anthropic_models():
             anthropic_api_url=base,
         ),
     )
-    LLM.claude_opus = Model(
+    LLM.claude_opus_4_7 = Model(
         name="claude.opus-4.7", # 5$ per 1M
         model=ChatAnthropic(
             model="claude-opus-4-7",
@@ -758,11 +758,8 @@ except ClientAuthenticationError as e:
 eval_models = [
                 LLM.claude_sonnet,
                 LLM.claude_haiku_4_5,
-                LLM.o3,
-                LLM.gemini_3_pro,
-                LLM.gemini_3_flash,
-                LLM.gemini_2_5_pro,
-                LLM.gemini_2_5_flash,
-                LLM.gpt_4o,
+                LLM.claude_opus_4_7,
+                LLM.claude_opus,
+                LLM.gpt_5_2,
             ]
 
