@@ -206,7 +206,7 @@ def _compute_file_hotspots(df: pl.DataFrame) -> pl.DataFrame:
     """Identify most frequently patched files."""
     return df.group_by("file").agg([
         pl.col("cve").n_unique().alias("cve_count"),
-        pl.col("cve").count().alias("total_patches"),
+        pl.col("cve").count().alias("total_reports"),
         pl.col("confidence").mean().alias("avg_confidence"),
         pl.col("change_count").mean().alias("avg_change_count"),
         pl.col("quality_score").mean().alias("avg_quality_score"),
