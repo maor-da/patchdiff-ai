@@ -51,13 +51,13 @@ Each **Agent** is a subgraph and operates independently. Anyone can extend the s
 
 ## Prerequisites
 
-| Tool          | Version         | Why                                     |
-|---------------|-----------------|-----------------------------------------|
-| **Python**    | 3.11 x64        | Developed and tested using this version |
-| **IDA Pro**   | ≥ 8.0 and < 9.0 | Required by BinDiff 8                   |
-| **BinDiff**   | 8.0             | Binary diffing engine                   |
-| **BinExport** | ≥ 12            | IDA plugin that produces .BinDiff files |
-| **7-zip**     | ≥ 22            | Used to extract the update archives     |
+| Tool          | Version            | Why                                                    |
+|---------------|--------------------|--------------------------------------------------------|
+| **Python**    | 3.11 x64           | Developed and tested using this version                |
+| **IDA Pro**   | 8.x **or** 9.x     | 8.x via BinDiff 8; 9.x ships idalib natively for MCP   |
+| **BinDiff**   | 8 (with IDA 8.x) / 9 (with IDA 9.x) | Binary diffing engine                 |
+| **BinExport** | ≥ 12               | IDA plugin that produces .BinExport files              |
+| **7-zip**     | ≥ 22               | Used to extract the update archives                    |
 
 > [!IMPORTANT]
 > **Licensing:** IDA Pro is commercial. Buy a legal copy or fork this repo and extend it to Ghidra.
@@ -78,32 +78,55 @@ Download *Windows x64* installer from [https://www.python.org/downloads/release/
 python --version  # should print 3.11.x
 ```
 
-### 4.2 IDA Pro 8.x
+### 4.2 IDA Pro 8.x or 9.x
 
-1. Purchase / download IDA Pro 8.x from Hex‑Rays.
-2. Run the installer.
-3. Keep the default location (e.g. `C:\Program Files\IDA Pro 8.0`).
-4. Check if the IDA has access to python by running commands in the GUI shell.
-   If not, run `idapyswitch` as admin.
+1. Purchase / download IDA Pro from Hex‑Rays. Either track works:
+   * **IDA Pro 8.x** – default install `C:\Program Files\IDA Pro 8.x`, headless
+     binary is `idat64.exe`.
+   * **IDA Professional 9.x** – default install
+     `C:\Program Files\IDA Professional 9.x`. The separate `idat`/`idat64`
+     binaries were removed; the unified `ida.exe` runs headless when launched
+     with `-A`. idalib is bundled.
+2. Run the installer and keep the default location, or point the tool at a
+   custom install by setting `IDA_PATH` to the absolute path of the headless
+   binary, e.g.:
 
-```powershell
-"%IDA_PATH%\idapyswitch.exe"
-```
+   ```powershell
+   > setx IDA_PATH "C:\Program Files\IDA Professional 9.3\ida.exe"
+   ```
 
-### 4.3 BinExport + BinDiff 8
+   If `IDA_PATH` is unset, the tool auto-probes the usual 9.x and 8.x install
+   roots in that order and uses the first match.
+3. Verify IDA has access to Python. If the GUI shell cannot `import` Python
+   modules, run `idapyswitch` as admin:
 
-1. Download BinDiff 8 from Google Security Research.
-2. Validate the following DLLs in the IDA *plugins* folder:
-   * `%appdata%\Hex-Rays\IDA Pro\plugins`
-     * `bindiff8_ida*.dll`
-     * `binexport12_ida*.dll`
+   ```powershell
+   > "<IDA install dir>\idapyswitch.exe"
+   ```
+
+### 4.3 BinExport + BinDiff
+
+1. Download the BinDiff release matching your IDA major version from
+   Google Security Research (BinDiff 8 for IDA 8.x, BinDiff 9 for IDA 9.x).
+2. Validate the plugin DLLs under `%APPDATA%\Hex-Rays\IDA Pro\plugins` (or the
+   per-user plugins folder for IDA Professional 9.x):
+   * `bindiff<ver>_ida*.dll`
+   * `binexport12_ida*.dll`
 3. Restart IDA once to verify `Edit → Plugins → BinExport` is present.
 
 ### 4.4 IDA Pro MCP (headless idalib)
 
 The Reverse-Engineering flow no longer decompiles every BinDiff-flagged function up-front. Instead, after BinDiff finishes, the supervisor spawns **two headless `idalib-mcp` servers** (one per binary) and hands the worklist to an agent that pulls pseudocode on demand over SSE.
 
-1. Install **idalib** following the Hex-Rays documentation for your IDA Pro installation (idalib is bundled with IDA 9.0+; for 8.x consult Hex-Rays for the compatibility layer).
+1. Make sure **idalib** is available for your IDA install. It is bundled with
+   IDA 9.x; for 8.x consult Hex-Rays for the compatibility layer. idalib
+   typically needs to be initialised once so it can locate the IDA install:
+
+   ```powershell
+   > python -m idapro --configure
+   ```
+
+   (or follow the Hex-Rays idalib README for your IDA version).
 2. Install the CLI that hosts idalib over MCP:
 
    ```powershell
@@ -118,11 +141,12 @@ The Reverse-Engineering flow no longer decompiles every BinDiff-flagged function
 
 3. Environment knobs:
 
-   | Var                   | Default        | Purpose                                          |
-   |-----------------------|----------------|--------------------------------------------------|
-   | `IDALIB_MCP_BIN`      | `idalib-mcp`   | Override the launcher binary (absolute path ok). |
-   | `IDA_MCP_PORT_BASE`   | `8745`         | Primary server port; secondary uses `+1`.        |
-   | `IDA_MCP_BOOT_TIMEOUT`| `60` (seconds) | How long to wait for each port to open.          |
+   | Var                    | Default        | Purpose                                          |
+   |------------------------|----------------|--------------------------------------------------|
+   | `IDA_PATH`             | autodetected   | Full path to `ida.exe` (9.x) or `idat64.exe` (8.x). |
+   | `IDALIB_MCP_BIN`       | `idalib-mcp`   | Override the launcher binary (absolute path ok). |
+   | `IDA_MCP_PORT_BASE`    | `8745`         | Primary server port; secondary uses `+1`.        |
+   | `IDA_MCP_BOOT_TIMEOUT` | `60` (seconds) | How long to wait for each port to open.          |
 
 > [!NOTE]
 > The launcher always passes `--isolated-contexts`, so the two idalib sessions can run side-by-side safely. If `idalib-mcp` is missing from `PATH`, or a port fails to open within the boot timeout, the run aborts — there is no batch-decompile fallback.
