@@ -3,7 +3,9 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from requests_html import HTMLSession
+
+import requests
+from lxml import html as lxml_html
 
 from common import retry_on_exception, logger, resource_lock, console
 
@@ -12,15 +14,17 @@ DL_URL = "https://catalog.update.microsoft.com/DownloadDialog.aspx"
 UID_PAT = re.compile(r"goToDetails\(['\"]([0-9a-f\-]{36})['\"]\)")
 
 
-def find_uid(session: HTMLSession, kb: str, product: str) -> str:
+def find_uid(session: requests.Session, kb: str, product: str) -> str:
     resp = session.get(SEARCH_URL.format(kb), timeout=30)
+    resp.raise_for_status()
+    tree = lxml_html.fromstring(resp.text)
     target = 'microsoft server operating system' if 'server' in product.lower() else product.lower()
     target_tokens = set(re.findall(r"[a-z0-9]+", target))
     best_score, best_uid = -1, None
-    for a in resp.html.find("a[onclick^='goToDetails']"):
-        m = UID_PAT.search(a.attrs.get("onclick", ""))
+    for a in tree.cssselect("a[onclick^='goToDetails']"):
+        m = UID_PAT.search(a.get("onclick", ""))
         if m:
-            tokens = set(re.findall(r"[a-z0-9]+", a.text.lower()))
+            tokens = set(re.findall(r"[a-z0-9]+", a.text_content().lower()))
             s = len(target_tokens & tokens)
             if s > best_score:
                 best_score, best_uid = s, m.group(1)
@@ -29,7 +33,7 @@ def find_uid(session: HTMLSession, kb: str, product: str) -> str:
     return best_uid
 
 
-def find_msu(session: HTMLSession, uid: str, kb: str) -> str:
+def find_msu(session: requests.Session, uid: str, kb: str) -> str:
     payload = {"updateIDs": f'[{{"uidInfo":"{uid}","updateID":"{uid}"}}]'}
     html = session.post(DL_URL, data=payload, timeout=30).text
     msu_re = re.compile(rf"https://[^'\"\s]*kb{kb}[^'\"\s]*\.(?:msu|cab)", re.I)
@@ -40,7 +44,7 @@ def find_msu(session: HTMLSession, uid: str, kb: str) -> str:
     return url
 
 
-def grab(session: HTMLSession, url: str, out_dir: Path, overwrite: bool) -> Path:
+def grab(session: requests.Session, url: str, out_dir: Path, overwrite: bool) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     name = url.rsplit('/', 1)[1]
     dest = out_dir / name
@@ -70,7 +74,7 @@ def download_kb(kb, product, out_dir: Path, overwrite=False) -> Path:
         return files[0]
 
     kb_num = kb.lower().lstrip("kb")
-    session = HTMLSession()
+    session = requests.Session()
     session.cookies.set('display-culture', 'en-US')
 
     uid = find_uid(session, kb, product)

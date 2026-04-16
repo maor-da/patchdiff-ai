@@ -11,7 +11,7 @@
 2. [Architecture](#architecture)
 3. [Prerequisites](#prerequisites)
 4. [Installation](#installation)
-   * [4.1 Python 3.11](#41-python-311)
+   * [4.1 Python 3.11 or 3.14](#41-python-311-or-314)
    * [4.2 IDA Pro 8.x](#42-ida-pro-8x)
    * [4.3 BinExport + BinDiff 8](#43-binexport--bindiff-8)
    * [4.4 IDA Pro MCP (headless idalib)](#44-ida-pro-mcp-headless-idalib)
@@ -53,7 +53,7 @@ Each **Agent** is a subgraph and operates independently. Anyone can extend the s
 
 | Tool          | Version            | Why                                                    |
 |---------------|--------------------|--------------------------------------------------------|
-| **Python**    | 3.11 x64           | Developed and tested using this version                |
+| **Python**    | 3.11 or 3.14 x64   | Developed on 3.11; 3.14 supported via relaxed pins     |
 | **IDA Pro**   | 8.x **or** 9.x     | 8.x via BinDiff 8; 9.x ships idalib natively for MCP   |
 | **BinDiff**   | 8 (with IDA 8.x) / 9 (with IDA 9.x) | Binary diffing engine                 |
 | **BinExport** | ≥ 12               | IDA plugin that produces .BinExport files              |
@@ -70,13 +70,21 @@ Each **Agent** is a subgraph and operates independently. Anyone can extend the s
 
 ## Installation
 
-### 4.1 Python 3.11
+### 4.1 Python 3.11 or 3.14
 
-Download *Windows x64* installer from [https://www.python.org/downloads/release/python-3119/](https://www.python.org/downloads/release/python-3119/). During setup **enable “Add to PATH”** and **“Install for all users”**.
+Either version works. 3.11 is the original tested target; 3.14 is supported via
+the relaxed `>=` pins in `requirements.txt`. Download the *Windows x64* installer
+from [python.org/downloads](https://www.python.org/downloads/). During setup
+**enable “Add to PATH”** and **“Install for all users”**.
 
 ```powershell
-python --version  # should print 3.11.x
+python --version  # should print 3.11.x or 3.14.x
 ```
+
+> [!NOTE]
+> On 3.14, pip will pull newer wheels for `chromadb`, `lxml`, `cffi`, etc. —
+> older pinned versions do not publish 3.14 wheels and would otherwise fail to
+> build against MSVC.
 
 ### 4.2 IDA Pro 8.x or 9.x
 

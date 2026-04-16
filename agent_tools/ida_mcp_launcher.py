@@ -87,7 +87,7 @@ class IdaMcpLauncher:
         return primary_url, secondary_url
 
     async def _wait_port_open(self, host: str, port: int) -> None:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         deadline = loop.time() + self.boot_timeout
         last_exc: BaseException | None = None
 
