@@ -744,7 +744,7 @@ try:
 
     init_azure_models(azure_credential)
     init_anthropic_models()
-    init_gemini_models()
+    # init_gemini_models()
 
     init_agents_models()
 
